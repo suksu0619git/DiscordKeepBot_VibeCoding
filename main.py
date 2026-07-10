@@ -8,11 +8,12 @@ intents = discord.Intents.default()
 intents.message_content = True
 intents.members = True
 intents.guilds = True
+intents.guild_reactions = True
 
 bot = discord.Bot(
     intents=intents,
     # 입력하신 서버 ID (디버그용 서버)
-    debug_guilds=[1405484178903928892]
+    debug_guilds=[1472847600746233879]
 )   
 
 base_path = os.path.dirname(os.path.abspath(__file__))

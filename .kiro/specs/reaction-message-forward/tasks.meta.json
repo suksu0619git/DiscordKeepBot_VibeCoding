@@ -1,0 +1,256 @@
+{
+  "pbtResults": {},
+  "executionHistory": {
+    "1.1 ReactionForward Cog 파일 생성 및 기본 구조 구현": [
+      {
+        "executionId": "e7bf2c55-aba3-49be-a48e-40dec42e4ea0",
+        "chatSessionId": "sess_3df01503-b3cd-41f9-9921-60bec72dfece",
+        "timestamp": 1783617472455
+      },
+      {
+        "executionId": "e7bf2c55-aba3-49be-a48e-40dec42e4ea0",
+        "chatSessionId": "sess_3df01503-b3cd-41f9-9921-60bec72dfece",
+        "timestamp": 1783617481786
+      },
+      {
+        "executionId": "e7bf2c55-aba3-49be-a48e-40dec42e4ea0",
+        "chatSessionId": "sess_3df01503-b3cd-41f9-9921-60bec72dfece",
+        "timestamp": 1783617873682
+      }
+    ],
+    "1.2 main.py에 필수 Intent 추가": [
+      {
+        "executionId": "e7bf2c55-aba3-49be-a48e-40dec42e4ea0",
+        "chatSessionId": "sess_3df01503-b3cd-41f9-9921-60bec72dfece",
+        "timestamp": 1783617473205
+      },
+      {
+        "executionId": "e7bf2c55-aba3-49be-a48e-40dec42e4ea0",
+        "chatSessionId": "sess_3df01503-b3cd-41f9-9921-60bec72dfece",
+        "timestamp": 1783617878595
+      },
+      {
+        "executionId": "e7bf2c55-aba3-49be-a48e-40dec42e4ea0",
+        "chatSessionId": "sess_3df01503-b3cd-41f9-9921-60bec72dfece",
+        "timestamp": 1783618134476
+      }
+    ],
+    "2.1 JSON 파일 로드/저장 메서드 구현": [
+      {
+        "executionId": "e7bf2c55-aba3-49be-a48e-40dec42e4ea0",
+        "chatSessionId": "sess_3df01503-b3cd-41f9-9921-60bec72dfece",
+        "timestamp": 1783617473321
+      },
+      {
+        "executionId": "e7bf2c55-aba3-49be-a48e-40dec42e4ea0",
+        "chatSessionId": "sess_3df01503-b3cd-41f9-9921-60bec72dfece",
+        "timestamp": 1783618139238
+      },
+      {
+        "executionId": "e7bf2c55-aba3-49be-a48e-40dec42e4ea0",
+        "chatSessionId": "sess_3df01503-b3cd-41f9-9921-60bec72dfece",
+        "timestamp": 1783618230064
+      }
+    ],
+    "2.2 중복 확인 및 마킹 메서드 구현": [
+      {
+        "executionId": "e7bf2c55-aba3-49be-a48e-40dec42e4ea0",
+        "chatSessionId": "sess_3df01503-b3cd-41f9-9921-60bec72dfece",
+        "timestamp": 1783617473404
+      },
+      {
+        "executionId": "e7bf2c55-aba3-49be-a48e-40dec42e4ea0",
+        "chatSessionId": "sess_3df01503-b3cd-41f9-9921-60bec72dfece",
+        "timestamp": 1783618234635
+      },
+      {
+        "executionId": "e7bf2c55-aba3-49be-a48e-40dec42e4ea0",
+        "chatSessionId": "sess_3df01503-b3cd-41f9-9921-60bec72dfece",
+        "timestamp": 1783618264779
+      }
+    ],
+    "3.1 on_raw_reaction_add 이벤트 리스너 구현": [
+      {
+        "executionId": "e7bf2c55-aba3-49be-a48e-40dec42e4ea0",
+        "chatSessionId": "sess_3df01503-b3cd-41f9-9921-60bec72dfece",
+        "timestamp": 1783617473514
+      },
+      {
+        "executionId": "e7bf2c55-aba3-49be-a48e-40dec42e4ea0",
+        "chatSessionId": "sess_3df01503-b3cd-41f9-9921-60bec72dfece",
+        "timestamp": 1783618270065
+      },
+      {
+        "executionId": "e7bf2c55-aba3-49be-a48e-40dec42e4ea0",
+        "chatSessionId": "sess_3df01503-b3cd-41f9-9921-60bec72dfece",
+        "timestamp": 1783618308011
+      }
+    ],
+    "4.1 원본 메시지 가져오기 메서드 구현": [
+      {
+        "executionId": "e7bf2c55-aba3-49be-a48e-40dec42e4ea0",
+        "chatSessionId": "sess_3df01503-b3cd-41f9-9921-60bec72dfece",
+        "timestamp": 1783617473621
+      },
+      {
+        "executionId": "e7bf2c55-aba3-49be-a48e-40dec42e4ea0",
+        "chatSessionId": "sess_3df01503-b3cd-41f9-9921-60bec72dfece",
+        "timestamp": 1783618317126
+      },
+      {
+        "executionId": "e7bf2c55-aba3-49be-a48e-40dec42e4ea0",
+        "chatSessionId": "sess_3df01503-b3cd-41f9-9921-60bec72dfece",
+        "timestamp": 1783618345889
+      }
+    ],
+    "4.2 대상 채널 가져오기 메서드 구현": [
+      {
+        "executionId": "e7bf2c55-aba3-49be-a48e-40dec42e4ea0",
+        "chatSessionId": "sess_3df01503-b3cd-41f9-9921-60bec72dfece",
+        "timestamp": 1783617473697
+      },
+      {
+        "executionId": "e7bf2c55-aba3-49be-a48e-40dec42e4ea0",
+        "chatSessionId": "sess_3df01503-b3cd-41f9-9921-60bec72dfece",
+        "timestamp": 1783618350367
+      },
+      {
+        "executionId": "e7bf2c55-aba3-49be-a48e-40dec42e4ea0",
+        "chatSessionId": "sess_3df01503-b3cd-41f9-9921-60bec72dfece",
+        "timestamp": 1783619648577
+      }
+    ],
+    "4.3 임베드 생성 메서드 구현": [
+      {
+        "executionId": "e7bf2c55-aba3-49be-a48e-40dec42e4ea0",
+        "chatSessionId": "sess_3df01503-b3cd-41f9-9921-60bec72dfece",
+        "timestamp": 1783617473775
+      },
+      {
+        "executionId": "e7bf2c55-aba3-49be-a48e-40dec42e4ea0",
+        "chatSessionId": "sess_3df01503-b3cd-41f9-9921-60bec72dfece",
+        "timestamp": 1783619654618
+      }
+    ],
+    "4.4 안전한 메시지 포워딩 메서드 구현": [
+      {
+        "executionId": "e7bf2c55-aba3-49be-a48e-40dec42e4ea0",
+        "chatSessionId": "sess_3df01503-b3cd-41f9-9921-60bec72dfece",
+        "timestamp": 1783617473861
+      },
+      {
+        "executionId": "0209a3b3-169c-4a9f-a7b6-dd54f27f5c77",
+        "chatSessionId": "sess_377eb611-46a2-4a92-b8ff-3928429cca87",
+        "timestamp": 1783620042824
+      },
+      {
+        "executionId": "0209a3b3-169c-4a9f-a7b6-dd54f27f5c77",
+        "chatSessionId": "sess_377eb611-46a2-4a92-b8ff-3928429cca87",
+        "timestamp": 1783620178110
+      }
+    ],
+    "5. 체크포인트 - 기본 기능 테스트": [
+      {
+        "executionId": "e7bf2c55-aba3-49be-a48e-40dec42e4ea0",
+        "chatSessionId": "sess_3df01503-b3cd-41f9-9921-60bec72dfece",
+        "timestamp": 1783617473936
+      },
+      {
+        "executionId": "0209a3b3-169c-4a9f-a7b6-dd54f27f5c77",
+        "chatSessionId": "sess_377eb611-46a2-4a92-b8ff-3928429cca87",
+        "timestamp": 1783620186975
+      },
+      {
+        "executionId": "0209a3b3-169c-4a9f-a7b6-dd54f27f5c77",
+        "chatSessionId": "sess_377eb611-46a2-4a92-b8ff-3928429cca87",
+        "timestamp": 1783620266842
+      }
+    ],
+    "7.1 코드 주석 및 docstring 추가": [
+      {
+        "executionId": "e7bf2c55-aba3-49be-a48e-40dec42e4ea0",
+        "chatSessionId": "sess_3df01503-b3cd-41f9-9921-60bec72dfece",
+        "timestamp": 1783617474007
+      },
+      {
+        "executionId": "0209a3b3-169c-4a9f-a7b6-dd54f27f5c77",
+        "chatSessionId": "sess_377eb611-46a2-4a92-b8ff-3928429cca87",
+        "timestamp": 1783620313114
+      },
+      {
+        "executionId": "0209a3b3-169c-4a9f-a7b6-dd54f27f5c77",
+        "chatSessionId": "sess_377eb611-46a2-4a92-b8ff-3928429cca87",
+        "timestamp": 1783621242616
+      }
+    ],
+    "7.2 배포 체크리스트 확인": [
+      {
+        "executionId": "e7bf2c55-aba3-49be-a48e-40dec42e4ea0",
+        "chatSessionId": "sess_3df01503-b3cd-41f9-9921-60bec72dfece",
+        "timestamp": 1783617474086
+      },
+      {
+        "executionId": "0209a3b3-169c-4a9f-a7b6-dd54f27f5c77",
+        "chatSessionId": "sess_377eb611-46a2-4a92-b8ff-3928429cca87",
+        "timestamp": 1783620313860
+      },
+      {
+        "executionId": "0209a3b3-169c-4a9f-a7b6-dd54f27f5c77",
+        "chatSessionId": "sess_377eb611-46a2-4a92-b8ff-3928429cca87",
+        "timestamp": 1783621243319
+      }
+    ],
+    "8. 최종 체크포인트 - 통합 검증": [
+      {
+        "executionId": "e7bf2c55-aba3-49be-a48e-40dec42e4ea0",
+        "chatSessionId": "sess_3df01503-b3cd-41f9-9921-60bec72dfece",
+        "timestamp": 1783617474163
+      },
+      {
+        "executionId": "0209a3b3-169c-4a9f-a7b6-dd54f27f5c77",
+        "chatSessionId": "sess_377eb611-46a2-4a92-b8ff-3928429cca87",
+        "timestamp": 1783621252748
+      },
+      {
+        "executionId": "0209a3b3-169c-4a9f-a7b6-dd54f27f5c77",
+        "chatSessionId": "sess_377eb611-46a2-4a92-b8ff-3928429cca87",
+        "timestamp": 1783621338327
+      }
+    ],
+    "1. 프로젝트 구조 및 기본 Cog 설정": [
+      {
+        "executionId": "e7bf2c55-aba3-49be-a48e-40dec42e4ea0",
+        "chatSessionId": "sess_3df01503-b3cd-41f9-9921-60bec72dfece",
+        "timestamp": 1783618134557
+      }
+    ],
+    "2. 중복 추적 메커니즘 구현": [
+      {
+        "executionId": "e7bf2c55-aba3-49be-a48e-40dec42e4ea0",
+        "chatSessionId": "sess_3df01503-b3cd-41f9-9921-60bec72dfece",
+        "timestamp": 1783618264881
+      }
+    ],
+    "3. 반응 이벤트 감지 및 필터링": [
+      {
+        "executionId": "e7bf2c55-aba3-49be-a48e-40dec42e4ea0",
+        "chatSessionId": "sess_3df01503-b3cd-41f9-9921-60bec72dfece",
+        "timestamp": 1783618308094
+      }
+    ],
+    "4. 메시지 정보 검색 및 포워딩 로직": [
+      {
+        "executionId": "0209a3b3-169c-4a9f-a7b6-dd54f27f5c77",
+        "chatSessionId": "sess_377eb611-46a2-4a92-b8ff-3928429cca87",
+        "timestamp": 1783620294895
+      }
+    ],
+    "7. 문서화 및 배포 준비": [
+      {
+        "executionId": "0209a3b3-169c-4a9f-a7b6-dd54f27f5c77",
+        "chatSessionId": "sess_377eb611-46a2-4a92-b8ff-3928429cca87",
+        "timestamp": 1783621243441
+      }
+    ]
+  }
+}

@@ -1,0 +1,13 @@
+{
+	"folders": [
+		{
+			"name": ".venv",
+			"path": "../../../DoneApp/DiscordBot/.venv"
+		},
+		{
+			"name": "KeepBot",
+			"path": "../.."
+		}
+	],
+	"settings": {}
+}
