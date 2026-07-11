@@ -2,6 +2,7 @@ import discord
 from discord.ext import commands
 import json
 import os
+import re
 from typing import Set, Optional
 import logging
 
@@ -114,10 +115,46 @@ class ReactionForward(commands.Cog):
             logger.error(f"Error fetching source message {payload.message_id}: {e}")
             return None
 
+    @staticmethod
+    def _extract_custom_emojis(content: str) -> list[tuple[str, str, bool]]:
+        """
+        메시지 내용에서 커스텀 이모지 정보를 추출합니다.
+        반환값: [(name, id, is_animated), ...]
+        """
+        # 애니메이션: <a:name:id>
+        animated = [(name, eid, True) for name, eid in re.findall(r"<a:(\w+):(\d+)>", content)]
+        # 일반: <:name:id>
+        static = [(name, eid, False) for name, eid in re.findall(r"<:(\w+):(\d+)>", content)]
+        return animated + static
+
+    @staticmethod
+    def _emoji_cdn_url(emoji_id: str, animated: bool) -> str:
+        """이모지 ID로 Discord CDN URL을 생성합니다."""
+        ext = "gif" if animated else "png"
+        return f"https://cdn.discordapp.com/emojis/{emoji_id}.{ext}?size=256"
+
+    @staticmethod
+    def _sanitize_content(content: str) -> str:
+        """
+        embed description에 커스텀 이모지가 CDN URL로 표시되는 문제를 방지합니다.
+        <:name:id> 또는 <a:name:id> 형태를 :name: 텍스트로 변환합니다.
+        """
+        content = re.sub(r"<a:(\w+):\d+>", r":\1:", content)
+        content = re.sub(r"<:(\w+):\d+>", r":\1:", content)
+        return content
+
     def _create_forward_embed(self, message: discord.Message) -> discord.Embed:
         """포워딩할 임베드를 생성"""
+        raw_content = message.content or ""
+
+        # 커스텀 이모지 추출
+        custom_emojis = self._extract_custom_emojis(raw_content)
+
+        # description: 이모지 태그를 :name: 텍스트로 변환
+        description = self._sanitize_content(raw_content) if raw_content else "*첨부 파일만 포함*"
+
         embed = discord.Embed(
-            description=message.content or "*첨부 파일만 포함*",
+            description=description,
             color=EMBED_COLOR,
             timestamp=message.created_at
         )
@@ -127,12 +164,26 @@ class ReactionForward(commands.Cog):
             icon_url=message.author.display_avatar.url if message.author.display_avatar else None
         )
 
-        # 첫 번째 이미지 첨부
+        # 이미지 우선순위: 첨부파일 > 커스텀 이모지
+        image_set = False
         if message.attachments:
             for attachment in message.attachments:
                 if attachment.content_type and attachment.content_type.startswith("image/"):
                     embed.set_image(url=attachment.url)
+                    image_set = True
                     break
+
+        if not image_set and custom_emojis:
+            # 커스텀 이모지가 있을 때: 이모지 이미지를 embed에 표시
+            name, eid, animated = custom_emojis[0]
+            emoji_url = self._emoji_cdn_url(eid, animated)
+
+            # 메시지가 이모지만 있으면 크게(image), 텍스트도 있으면 작게(thumbnail)
+            only_emojis = re.sub(r"<a?:\w+:\d+>", "", raw_content).strip() == ""
+            if only_emojis:
+                embed.set_image(url=emoji_url)
+            else:
+                embed.set_thumbnail(url=emoji_url)
 
         # 원본 메시지 링크
         embed.add_field(
