@@ -9,6 +9,7 @@ logger = logging.getLogger(__name__)
 
 PIN_EMOJI = "⭐"
 MIN_REACTIONS = 5
+SUPER_REACTIONS = 30
 FORWARDED_DB_FILE = "forwarded.json"
 EMBED_COLOR = 0x5865F2
 
@@ -31,6 +32,7 @@ class ReactionForward(commands.Cog):
         
         self.db_file = FORWARDED_DB_FILE
         self.forwarded_messages: Set[int] = self._load_forwarded_ids()
+        self.super_announced: Set[int] = set()  # 특대왕 킵쭬 이미 알림한 메시지 ID
 
     def _parse_source_channels(self):
         """환경 변수에서 감지할 특정 채널 ID 목록을 불러옵니다."""
@@ -210,6 +212,15 @@ class ReactionForward(commands.Cog):
             if reaction_count < MIN_REACTIONS:
                 # 5개 미만이면 무시
                 return
+
+            # 30개 이상이면 특대왕 킾추 ㅋㅋ 알림 (1회만)
+            if reaction_count >= SUPER_REACTIONS and payload.message_id not in self.super_announced:
+                self.super_announced.add(payload.message_id)
+                target_channel = await self._get_target_channel()
+                if target_channel:
+                    await target_channel.send(
+                        f"⭐⭐⭐ **특대왕 킾추 ㅋㅋ** ⭐⭐⭐\n{original_message.jump_url}"
+                    )
 
             await self._forward_message_safe(payload, original_message)
 

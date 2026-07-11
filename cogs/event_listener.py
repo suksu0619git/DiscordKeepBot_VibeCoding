@@ -12,7 +12,9 @@ class EventListener(commands.Cog):
         self.bot = bot
         self.target_channel_id = 1472943305644965888
         self.allowed_roles = ["!"]
-        self.db_file = "schedules.json"
+        # 절대 경로를 사용해서 어떤 경로에서 봇을 켜도 데이터가 유지되도록 함
+        self.db_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "schedules.json")
+        self.db_file = os.path.normpath(self.db_file)
         self.meeting_schedule = self.load_schedules()
         self.check_schedule.start()
 
