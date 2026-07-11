@@ -12,7 +12,7 @@ class YouTubeNotifier(commands.Cog):
         # 채널 ID의 'UC'를 'UU'로 바꾸면 업로드 목록 플레이리스트 ID가 됩니다.
         self.uploads_playlist_id = self.channel_id.replace("UC", "UU", 1)
         self.discord_channel_id = 1422581802479910994
-        self.last_video_id = None 
+        self.last_video_id = None  
         self.check_youtube.start()
 
     def cog_unload(self):

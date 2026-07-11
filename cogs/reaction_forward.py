@@ -7,7 +7,8 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-PIN_EMOJI = "📌"
+PIN_EMOJI = "⭐"
+MIN_REACTIONS = 5
 FORWARDED_DB_FILE = "forwarded.json"
 EMBED_COLOR = 0x5865F2
 
@@ -26,8 +27,28 @@ class ReactionForward(commands.Cog):
             print("⚠️ TARGET_CHANNEL_ID 환경 변수가 설정되지 않았습니다. Reaction Forward 기능이 제대로 작동하지 않을 수 있습니다.")
             logger.warning("TARGET_CHANNEL_ID is not set.")
             
+        self._parse_source_channels()
+        
         self.db_file = FORWARDED_DB_FILE
         self.forwarded_messages: Set[int] = self._load_forwarded_ids()
+
+    def _parse_source_channels(self):
+        """환경 변수에서 감지할 특정 채널 ID 목록을 불러옵니다."""
+        source_channels_str = os.getenv("SOURCE_CHANNEL_IDS", "")
+        if source_channels_str:
+            try:
+                self.source_channel_ids = {
+                    int(id_str.strip())
+                    for id_str in source_channels_str.split(",")
+                    if id_str.strip()
+                }
+                logger.info(f"Loaded {len(self.source_channel_ids)} source channels for reaction forward.")
+            except ValueError as e:
+                print(f"⚠️ SOURCE_CHANNEL_IDS 파싱 오류: {e}")
+                logger.warning(f"SOURCE_CHANNEL_IDS parsing error: {e}")
+                self.source_channel_ids = set()
+        else:
+            self.source_channel_ids = set()
 
     def _load_forwarded_ids(self) -> Set[int]:
         """JSON 파일에서 이미 포워딩된 메시지 ID 목록을 로드"""
@@ -120,7 +141,7 @@ class ReactionForward(commands.Cog):
 
         return embed
 
-    async def _forward_message_safe(self, payload: discord.RawReactionActionEvent):
+    async def _forward_message_safe(self, payload: discord.RawReactionActionEvent, original_message: Optional[discord.Message] = None):
         """안전한 메시지 포워딩 (개별 오류 처리)"""
         try:
             target_channel = await self._get_target_channel()
@@ -128,7 +149,9 @@ class ReactionForward(commands.Cog):
                 print(f"❌ 대상 채널 {self.target_channel_id}를 찾을 수 없음")
                 return
 
-            original_message = await self._fetch_original_message(payload)
+            if original_message is None:
+                original_message = await self._fetch_original_message(payload)
+                
             if not original_message:
                 print(f"❌ 메시지 {payload.message_id}를 가져올 수 없음")
                 return
@@ -164,12 +187,31 @@ class ReactionForward(commands.Cog):
             if str(payload.emoji) != PIN_EMOJI:
                 return
 
+            # 특정 채널만 감지하도록 설정된 경우 필터링
+            if self.source_channel_ids and payload.channel_id not in self.source_channel_ids:
+                return
+
             if self._is_forwarded(payload.message_id):
                 print(f"ℹ️ 메시지 {payload.message_id}는 이미 포워딩됨. 무시.")
                 logger.info(f"Message {payload.message_id} already forwarded. Ignored.")
                 return
 
-            await self._forward_message_safe(payload)
+            # 원본 메시지를 가져와서 반응 개수를 확인합니다.
+            original_message = await self._fetch_original_message(payload)
+            if not original_message:
+                return
+
+            reaction_count = 0
+            for reaction in original_message.reactions:
+                if str(reaction.emoji) == PIN_EMOJI:
+                    reaction_count = reaction.count
+                    break
+
+            if reaction_count < MIN_REACTIONS:
+                # 5개 미만이면 무시
+                return
+
+            await self._forward_message_safe(payload, original_message)
 
         except Exception as e:
             print(f"❌ on_raw_reaction_add 예외: {e}")
