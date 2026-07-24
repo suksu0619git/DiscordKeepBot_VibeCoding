@@ -3,6 +3,8 @@ from discord.ext import commands
 import json
 import os
 import re
+import io
+import aiohttp
 from typing import Set, Optional
 import logging
 
@@ -164,7 +166,7 @@ class ReactionForward(commands.Cog):
             icon_url=message.author.display_avatar.url if message.author.display_avatar else None
         )
 
-        # 이미지 우선순위: 첨부파일 > 커스텀 이모지
+        # 이미지 우선순위: 첨부파일 > 커스텀 이모지 (영상은 별도 전송)
         image_set = False
         if message.attachments:
             for attachment in message.attachments:
@@ -194,6 +196,51 @@ class ReactionForward(commands.Cog):
 
         return embed
 
+    # 영상/오디오로 판별할 MIME 타입 접두사
+    VIDEO_MIME_PREFIXES = ("video/", "audio/")
+    # 파일 크기 제한 (Discord 기본 업로드 제한: 25MB)
+    MAX_FILE_SIZE = 25 * 1024 * 1024
+
+    async def _send_video_attachments(self, target_channel: discord.TextChannel, message: discord.Message):
+        """원본 메시지의 영상/오디오 첨부파일을 다운로드하여 대상 채널에 전송"""
+        video_attachments = [
+            att for att in message.attachments
+            if att.content_type and att.content_type.startswith(self.VIDEO_MIME_PREFIXES)
+        ]
+
+        if not video_attachments:
+            return
+
+        async with aiohttp.ClientSession() as session:
+            for attachment in video_attachments:
+                if attachment.size > self.MAX_FILE_SIZE:
+                    # 파일이 너무 크면 링크만 전송
+                    await target_channel.send(
+                        f"🎬 영상 (용량 초과로 링크 전송): {attachment.url}"
+                    )
+                    logger.info(f"Video attachment too large ({attachment.size} bytes), sent as link.")
+                    continue
+
+                try:
+                    async with session.get(attachment.url) as resp:
+                        if resp.status == 200:
+                            data = await resp.read()
+                            file_obj = discord.File(
+                                fp=io.BytesIO(data),
+                                filename=attachment.filename
+                            )
+                            await target_channel.send(file=file_obj)
+                            logger.info(f"Video attachment '{attachment.filename}' sent successfully.")
+                        else:
+                            await target_channel.send(
+                                f"🎬 영상 다운로드 실패 (status {resp.status}): {attachment.url}"
+                            )
+                except Exception as e:
+                    logger.error(f"Error downloading/sending video attachment: {e}")
+                    await target_channel.send(
+                        f"🎬 영상 전송 중 오류 발생: {attachment.url}"
+                    )
+
     async def _forward_message_safe(self, payload: discord.RawReactionActionEvent, original_message: Optional[discord.Message] = None):
         """안전한 메시지 포워딩 (개별 오류 처리)"""
         try:
@@ -212,6 +259,10 @@ class ReactionForward(commands.Cog):
             embed = self._create_forward_embed(original_message)
 
             await target_channel.send(embed=embed)
+
+            # 영상/오디오 첨부파일은 별도로 전송하여 인라인 재생 가능하게
+            await self._send_video_attachments(target_channel, original_message)
+
             print(f"✅ 메시지 {payload.message_id} 포워딩 완료")
             logger.info(f"Message {payload.message_id} forwarded successfully.")
 
