@@ -37,6 +37,8 @@ from datetime import date, datetime, timedelta, timezone
 import discord
 from discord.ext import commands, tasks
 
+import config
+
 logger = logging.getLogger(__name__)
 
 # 1. 한국 시간(KST) 정의
@@ -429,7 +431,9 @@ class CancelView(discord.ui.View):
 class EventListener(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
-        self.target_channel_id = 1472943305644965888
+        self.target_channel_id = config.MEETING_NOTIFY_CHANNEL_ID
+        if self.target_channel_id is None:
+            logger.warning("MEETING_NOTIFY_CHANNEL_ID 가 없어 일정 알림을 보낼 수 없습니다.")
         self.allowed_roles = ["!"]
         # 절대 경로를 사용해서 어떤 경로에서 봇을 켜도 데이터가 유지되도록 함
         self.db_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "schedules.json")
@@ -474,6 +478,8 @@ class EventListener(commands.Cog):
         return any(role in user_role_names for role in self.allowed_roles)
 
     async def get_target_channel(self):
+        if self.target_channel_id is None:
+            return None
         channel = self.bot.get_channel(self.target_channel_id)
         if not channel:
             try: channel = await self.bot.fetch_channel(self.target_channel_id)

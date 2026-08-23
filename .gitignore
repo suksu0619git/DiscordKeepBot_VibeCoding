@@ -7,3 +7,4 @@ __pycache__/
 data/
 youtube_state.json
 forwarded.json
+schedules.json
