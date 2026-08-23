@@ -1,0 +1,51 @@
+; KeepBot systemd unit 예시
+;
+; 설치:
+;   sudo cp deploy/discordbot.service /etc/systemd/system/discordbot.service
+;   sudo nano /etc/systemd/system/discordbot.service   # 아래 경로/사용자 수정
+;   sudo systemctl daemon-reload
+;   sudo systemctl enable --now discordbot
+;
+; 경로는 실제 배포 위치에 맞게 반드시 수정하세요.
+
+[Unit]
+Description=KeepBot (Discord Bot)
+Documentation=https://github.com/
+After=network-online.target
+Wants=network-online.target
+
+# 반복 크래시 시 무한 재시작 루프 방지: 5분 안에 5회 실패하면 중단.
+# 이 두 키는 [Service] 가 아니라 [Unit] 소속이다(다른 곳에 두면 무시된다).
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User=ubuntu
+Group=ubuntu
+
+# main.py 가 있는 폴더. cogs.* 임포트가 이 경로 기준으로 해석됩니다.
+WorkingDirectory=/home/ubuntu/KeepBot/DiscordKeepBot_VibeCoding
+
+# .env 를 systemd 환경변수로도 주입한다(config.py 도 같은 파일을 읽는다).
+# 파일이 없으면 기동이 실패하지 않도록 '-' 접두사를 붙였다.
+EnvironmentFile=-/home/ubuntu/KeepBot/.env
+
+# -u : 로그가 버퍼링 없이 즉시 journal 로 나가게 한다.
+ExecStart=/home/ubuntu/KeepBot/.venv/bin/python -u main.py
+
+# /재시작 명령은 종료 코드 1로 빠져나오므로 on-failure 로 자동 재기동된다.
+# (정상 종료(exit 0)일 때는 재기동하지 않는다)
+Restart=on-failure
+RestartSec=5
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=keepbot
+
+# 최소 권한 설정
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
