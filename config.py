@@ -54,6 +54,12 @@ def _get_int(key: str, default: int | None = None) -> int | None:
         return default
 
 
+def _get_int_req(key: str, default: int) -> int:
+    """`_get_int` 와 같지만 항상 int 를 돌려준다(0 을 유효한 값으로 쓰는 키용)."""
+    value = _get_int(key, default)
+    return default if value is None else value
+
+
 def _get_bool(key: str, default: bool) -> bool:
     raw = _get_str(key).lower()
     if not raw:
@@ -117,6 +123,48 @@ ANONYMOUS_CHANNEL_IDS: frozenset[int] = frozenset(
 # ---------------------------------------------------------------- 일정 알림(기존)
 MEETING_NOTIFY_CHANNEL_ID: int | None = _get_int("MEETING_NOTIFY_CHANNEL_ID")
 
+# ---------------------------------------------------------------- 신입 OT 수요조사
+# 매주 정해진 요일/시각에 "같은 문구"를 올려 참가 희망자를 모으는 정기 공지.
+# 최소 인원 같은 조건은 두지 않는다 — 반응을 보고 진행 여부는 사람이 판단한다.
+OT_NOTICE_CHANNEL_ID: int | None = _get_int("OT_NOTICE_CHANNEL_ID", 1422581802479910994)
+# 0=월 … 2=수 … 6=일 (datetime.weekday() 와 같은 기준)
+OT_NOTICE_WEEKDAY: int = _get_int_req("OT_NOTICE_WEEKDAY", 2)
+OT_NOTICE_HOUR: int = _get_int_req("OT_NOTICE_HOUR", 14)
+OT_NOTICE_MINUTE: int = _get_int_req("OT_NOTICE_MINUTE", 0)
+# 공지에 봇이 미리 달아둘 반응. 비워두면 반응을 달지 않는다.
+OT_NOTICE_EMOJI: str = _get_str("OT_NOTICE_EMOJI", "<:keep_cghm:1507318397191589949>")
+_DEFAULT_OT_NOTICE_MESSAGE = (
+    "# 금일 9시 신입 오리엔테이션✨️\n"
+    "## 참가를 희망하시는 신입분🐣 or 한 번도 안 들어보신 분은 미리 "
+    "<:keep_cghm:1507318397191589949> 눌러주세요!"
+)
+# .env 로 덮어쓸 때는 줄바꿈을 `\n` 두 글자로 적는다.
+_OT_NOTICE_MESSAGE_RAW = _get_str("OT_NOTICE_MESSAGE", _DEFAULT_OT_NOTICE_MESSAGE)
+OT_NOTICE_MESSAGE: str = _OT_NOTICE_MESSAGE_RAW.replace("\\n", "\n")
+
+# 수요조사에 미참가자가 반응하면 그날 이 시각으로 일정이 자동 등록된다("금일 9시").
+OT_SCHEDULE_HOUR: int = _get_int_req("OT_SCHEDULE_HOUR", 21)
+OT_SCHEDULE_MINUTE: int = _get_int_req("OT_SCHEDULE_MINUTE", 0)
+OT_SCHEDULE_CONTENT: str = _get_str("OT_SCHEDULE_CONTENT", "신입 오리엔테이션")
+
+# 참가 이력 DB. "한 번이라도 OT 를 들었는가" 만 담는다(활동 관리 DB 와 별개).
+OT_DB_PATH: str = _get_str("OT_DB_PATH", os.path.join(BASE_DIR, "data", "ot.db"))
+# 최초 1회 스캔에서 '참가함' 처리에서 빼둘 기존 인원(= 아직 OT 를 안 들은 사람).
+# 스캔은 딱 한 번만 돌므로, 그 뒤에 들어온 사람은 여기 적지 않아도 자동으로 OT 대상이다.
+_DEFAULT_OT_SEED_EXCLUDE_IDS = (
+    1545424556234121317,
+    1306520775406260257,
+    345744512095617024,
+    1239615001065422865,
+    865702970510409738,
+    1107683583667208283,
+    629636469576695808,
+    317256743484784641,
+)
+OT_SEED_EXCLUDE_IDS: frozenset[int] = frozenset(
+    _get_int_list("OT_SEED_EXCLUDE_IDS") or _DEFAULT_OT_SEED_EXCLUDE_IDS
+)
+
 # ---------------------------------------------------------------- FR-2 활동 관리
 ACTIVITY_DB_PATH: str = _get_str(
     "ACTIVITY_DB_PATH", os.path.join(BASE_DIR, "data", "activity.db")
@@ -126,7 +174,10 @@ ACTIVITY_ADMIN_ROLE_NAME: str = _get_str("ACTIVITY_ADMIN_ROLE_NAME")
 ACTIVITY_NOTIFY_CHANNEL_ID: int | None = _get_int("ACTIVITY_NOTIFY_CHANNEL_ID")
 # 활동 기간. 만료일 = 마지막 활동일 + 이 값(일). 개월 차감 방식은 쓰지 않는다.
 ACTIVITY_PERIOD_DAYS: int = _get_int("ACTIVITY_PERIOD_DAYS", 90) or 90
-EXPIRATION_WARN_DAYS: int = _get_int("EXPIRATION_WARN_DAYS", 21) or 21
+# 활동 카운트(마지막 활동일 = 1일째) 신호등. 이 일수를 '초과'하면 주황/빨강.
+# 주황 기준을 넘긴 멤버는 ACTIVITY_NOTIFY_CHANNEL_ID 채널에 한 번 공지된다.
+ACTIVITY_ORANGE_DAYS: int = _get_int("ACTIVITY_ORANGE_DAYS", 60) or 60
+ACTIVITY_RED_DAYS: int = _get_int("ACTIVITY_RED_DAYS", 90) or 90
 
 # ---------------------------------------------------------------- FR-6 반응 포워딩
 TARGET_CHANNEL_ID: int | None = _get_int("TARGET_CHANNEL_ID")
@@ -158,8 +209,10 @@ def validate() -> list[str]:
         problems.append(
             "ACTIVITY_ADMIN_ROLE_ID / ACTIVITY_ADMIN_ROLE_NAME 이 모두 없어 활동 관리 명령어를 아무도 쓸 수 없습니다."
         )
+    if OT_NOTICE_CHANNEL_ID is None:
+        problems.append("OT_NOTICE_CHANNEL_ID 가 없어 신입 OT 수요조사 공지가 비활성화됩니다.")
     if ACTIVITY_NOTIFY_CHANNEL_ID is None:
-        problems.append("ACTIVITY_NOTIFY_CHANNEL_ID 가 없어 만료 임박 알림을 보낼 수 없습니다.")
+        problems.append("ACTIVITY_NOTIFY_CHANNEL_ID 가 없어 활동 공지를 보낼 수 없습니다.")
     if not YOUTUBE_API_KEY or not YOUTUBE_CHANNEL_ID:
         problems.append("YOUTUBE_API_KEY / YOUTUBE_CHANNEL_ID 가 없어 업로드 감지가 비활성화됩니다.")
     return problems

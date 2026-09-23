@@ -3,8 +3,9 @@
 - 만료일 = **마지막 활동일 + config.ACTIVITY_PERIOD_DAYS**. 개월에서 차감하지 않는다.
 - 지정 역할(config: ACTIVITY_ADMIN_ROLE_ID / ACTIVITY_ADMIN_ROLE_NAME)만 명령어 실행 가능
 - FR-1 `/크레딧` 제출 시 `apply_credit_activity()` 로 자동 갱신
-- 매일 1회 만료 임박 멤버를 지정 채널(ACTIVITY_NOTIFY_CHANNEL_ID)에 공지하고 warned=1 로 마킹
-  (개인 DM 도, 당사자 멘션도 보내지 않는다 — "OOO 님이 3주 남았습니다!" 채널 공지만 남긴다)
+- 조회·신호등·공지의 기준은 '마지막 활동일 = 1일째' 로 세는 활동 카운트(+N일)
+- 매일 1회 카운트가 ACTIVITY_ORANGE_DAYS 를 넘긴 멤버를 지정 채널(ACTIVITY_NOTIFY_CHANNEL_ID)에
+  공지하고 warned=1 로 마킹 (개인 DM 도, 당사자 멘션도 보내지 않는다 — 채널 공지만 남긴다)
 """
 
 from __future__ import annotations
@@ -22,6 +23,7 @@ from services.activity_db import (
     ActivityDB,
     NicknameTakenError,
     elapsed_days,
+    elapsed_light,
     format_elapsed_ko,
     now_kst,
     remaining_breakdown,
@@ -32,6 +34,7 @@ logger = logging.getLogger(__name__)
 
 DENY_MESSAGE = "❌ 이 명령어를 실행할 권한이 없습니다. (활동 관리 역할 전용)"
 _EMBED_DESC_LIMIT = 3800  # Embed description 4096 제한에 여유를 둔 값
+_LIGHT_COLORS = {"🟢": 0x2ECC71, "🟠": 0xE67E22, "🔴": 0xE74C3C}
 
 
 def is_activity_admin(user: discord.abc.User | discord.Member) -> bool:
@@ -277,6 +280,10 @@ class ActivityTracker(commands.Cog):
     # ------------------------------------------------------------------ #
     # 공용 헬퍼
     # ------------------------------------------------------------------ #
+    @staticmethod
+    def _light(elapsed: int) -> str:
+        return elapsed_light(elapsed, config.ACTIVITY_ORANGE_DAYS, config.ACTIVITY_RED_DAYS)
+
     def _member_label(self, user_id: int, nickname: str) -> str:
         member = None
         for guild in self.bot.guilds:
@@ -331,28 +338,23 @@ class ActivityTracker(commands.Cog):
                 ephemeral=True,
             )
 
-        rem = record.remaining()
+        elapsed = record.elapsed()
+        light = self._light(elapsed)
         embed = discord.Embed(
-            title=f"📋 {record.nickname} 활동 현황",
-            color=0xE74C3C if rem.expired else 0x2ECC71,
+            title=f"{light} {record.nickname} 활동 현황",
+            color=_LIGHT_COLORS[light],
         )
         embed.add_field(name="멤버", value=멤버.mention, inline=True)
         embed.add_field(name="크레딧 닉네임", value=record.nickname, inline=True)
-        # 주 지표는 '마지막 활동으로부터 며칠'. 잔여/만료는 그 아래 참고로 둔다.
+        # 카운트는 '마지막 활동으로부터 +N일' 로만 보여준다(잔여 일수 카운트다운은 쓰지 않는다).
         embed.add_field(
             name="마지막 활동으로부터",
-            value=format_elapsed_ko(record.elapsed()),
+            value=f"{light} {format_elapsed_ko(elapsed)}",
             inline=False,
         )
         embed.add_field(
             name="마지막 활동",
             value=record.last_active.strftime("%Y-%m-%d"),
-            inline=True,
-        )
-        embed.add_field(name="잔여", value=rem.format_ko(), inline=True)
-        embed.add_field(
-            name="만료일",
-            value=f"{record.expire_date.strftime('%Y-%m-%d')}\n(마지막 활동 +{self.days}일)",
             inline=True,
         )
         embed.add_field(
@@ -363,7 +365,7 @@ class ActivityTracker(commands.Cog):
         await ctx.followup.send(embed=embed, ephemeral=True)
 
     @discord.slash_command(
-        name="활동전체조회", description="전체 멤버를 만료 임박순으로 조회합니다."
+        name="활동전체조회", description="전체 멤버를 마지막 활동이 오래된 순으로 조회합니다."
     )
     @require_activity_admin()
     async def activity_lookup_all(self, ctx: discord.ApplicationContext):
@@ -374,18 +376,24 @@ class ActivityTracker(commands.Cog):
             return await ctx.followup.send("등록된 멤버가 없습니다.")
 
         now = now_kst()
+        records.sort(key=lambda record: record.last_active)
         lines = []
         for index, record in enumerate(records, start=1):
-            rem = remaining_breakdown(record.expire_date, now)
-            mark = "🔴" if rem.expired else ("🟡" if rem.total_days <= config.EXPIRATION_WARN_DAYS else "🟢")
-            # 주 지표는 '마지막 활동으로부터 며칠'. 잔여/만료는 뒤에 참고로 붙인다.
             elapsed = elapsed_days(record.last_active, now)
             lines.append(
-                f"{mark} **{index}. {self._member_label(record.user_id, record.nickname)}**\n"
-                f"　└ **{format_elapsed_ko(elapsed)}** · 마지막 활동 "
-                f"{record.last_active.strftime('%Y-%m-%d')} · {rem.format_ko()}"
+                f"{self._light(elapsed)} **{index}. {self._member_label(record.user_id, record.nickname)}**\n"
+                f"　└ 마지막 활동 {record.last_active.strftime('%Y-%m-%d')}"
+                f" · {format_elapsed_ko(elapsed)}"
             )
-        await self._send_chunked(ctx, f"📊 활동 현황 (총 {len(records)}명, 만료 임박순)", lines)
+        await self._send_chunked(
+            ctx,
+            f"📊 활동 현황 (총 {len(records)}명, 오래된 활동순)",
+            lines + [
+                "",
+                f"🟢 {config.ACTIVITY_ORANGE_DAYS}일 이하 · 🟠 {config.ACTIVITY_ORANGE_DAYS}일 초과"
+                f" · 🔴 {config.ACTIVITY_RED_DAYS}일 초과",
+            ],
+        )
 
     @discord.slash_command(name="활동등록", description="신규 멤버를 등록하고 카운트를 시작합니다.")
     @require_activity_admin()
@@ -524,7 +532,7 @@ class ActivityTracker(commands.Cog):
         buffer = io.StringIO()
         writer = csv.writer(buffer)
         writer.writerow(
-            ["user_id", "nickname", "last_active", "expire_date", "remaining_days", "warned", "status"]
+            ["user_id", "nickname", "last_active", "elapsed_days", "expire_date", "remaining_days", "warned", "status"]
         )
         for record in records:
             writer.writerow(
@@ -532,6 +540,7 @@ class ActivityTracker(commands.Cog):
                     record.user_id,
                     record.nickname,
                     record.last_active.strftime("%Y-%m-%d"),
+                    elapsed_days(record.last_active, now),
                     record.expire_date.strftime("%Y-%m-%d"),
                     remaining_breakdown(record.expire_date, now).total_days,
                     int(record.warned),
@@ -583,13 +592,13 @@ class ActivityTracker(commands.Cog):
     # ------------------------------------------------------------------ #
     @tasks.loop(hours=24)
     async def expiration_scan(self):
-        """매일 만료 임박 멤버를 스캔해 알림하고 warned=1 로 마킹."""
+        """매일 활동 카운트가 기준을 넘긴 멤버를 스캔해 알림하고 warned=1 로 마킹."""
         try:
             await self._ensure_schema()
-            pending = await self.db.list_pending_warnings(config.EXPIRATION_WARN_DAYS)
+            pending = await self.db.list_pending_warnings(config.ACTIVITY_ORANGE_DAYS)
             await self.db.mark_expired()
             if not pending:
-                logger.info("만료 임박 대상 없음 (기준 %d일)", config.EXPIRATION_WARN_DAYS)
+                logger.info("활동 공지 대상 없음 (기준 %d일 초과)", config.ACTIVITY_ORANGE_DAYS)
                 return
 
             channel = await self._get_notify_channel()
@@ -604,30 +613,30 @@ class ActivityTracker(commands.Cog):
             now = now_kst()
             lines = []
             for record in pending:
-                rem = remaining_breakdown(record.expire_date, now)
+                elapsed = elapsed_days(record.last_active, now)
                 # 멘션(<@id>)도 DM 도 쓰지 않는다. 채널에 이름만 적어 공지로 남긴다.
                 lines.append(
-                    f"· **{record.nickname}** 님이 {rem.format_weeks_ko()}!"
-                    f" (만료 {record.expire_date.strftime('%Y-%m-%d')})"
+                    f"{self._light(elapsed)} **{record.nickname}** 님이 마지막 활동으로부터"
+                    f" **+{elapsed}일째**입니다! (마지막 활동 {record.last_active.strftime('%Y-%m-%d')})"
                 )
 
             embed = discord.Embed(
-                title=f"⏰ 활동 기간 만료 임박 ({len(pending)}명)",
+                title=f"⏰ 활동 {config.ACTIVITY_ORANGE_DAYS}일 초과 ({len(pending)}명)",
                 description="\n".join(lines)[:_EMBED_DESC_LIMIT],
-                color=0xF1C40F,
+                color=_LIGHT_COLORS["🟠"],
             )
             embed.set_footer(
-                text=f"기준: 만료 {config.EXPIRATION_WARN_DAYS}일 이내"
-                f" · 영상 참여 시 마지막 활동일 +{self.days}일로 자동 갱신됩니다"
+                text=f"🟠 {config.ACTIVITY_ORANGE_DAYS}일 초과 · 🔴 {config.ACTIVITY_RED_DAYS}일 초과"
+                " · 영상 크레딧에 오르면 카운트가 +1일로 초기화됩니다"
             )
             # 닉네임에 멘션처럼 보이는 문자열이 들어가도 실제 알림이 가지 않도록 막는다.
             await channel.send(embed=embed, allowed_mentions=discord.AllowedMentions.none())
 
             await self.db.mark_warned([record.user_id for record in pending])
-            logger.info("만료 임박 알림 발송 완료: %d명", len(pending))
+            logger.info("활동 %d일 초과 공지 발송 완료: %d명", config.ACTIVITY_ORANGE_DAYS, len(pending))
         except Exception:
             # loop 안에서 예외가 새면 태스크가 죽으므로 반드시 잡아서 기록한다.
-            logger.exception("만료 임박 스캔 중 오류")
+            logger.exception("활동 공지 스캔 중 오류")
 
     async def _get_notify_channel(self):
         channel_id = config.ACTIVITY_NOTIFY_CHANNEL_ID

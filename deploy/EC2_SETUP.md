@@ -109,8 +109,9 @@ nano ~/KeepBot/.env           # 서버용 채널/역할 ID 확인
 ```ini
 TOKEN=봇토큰
 ACTIVITY_PERIOD_DAYS=90     # 만료일 = 마지막 활동일 + 90일
-EXPIRATION_WARN_DAYS=21     # 21일 남으면 "OOO 님이 3주 남았습니다!" 공지
-ACTIVITY_NOTIFY_CHANNEL_ID=만료임박공지채널ID
+ACTIVITY_ORANGE_DAYS=60     # 활동 +60일 초과 → 🟠 + "OOO 님이 +61일째입니다!" 공지
+ACTIVITY_RED_DAYS=90        # 활동 +90일 초과 → 🔴
+ACTIVITY_NOTIFY_CHANNEL_ID=활동공지채널ID
 ```
 
 한 번 손으로 띄워서 로그를 확인합니다.

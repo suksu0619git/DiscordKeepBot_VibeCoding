@@ -43,7 +43,6 @@ def sample_credit_data() -> CreditData:
         three_d=people_from_names("suksu0619"),
         filming=people_from_names("AT_Cat"),
         act=people_from_names("잉어에요, 깜 냐 옹"),
-        music="Chopin, Nocturne No.2",
         music_link="https://youtu.be/zql8G-4gE7w",
         world="Studio KEEP - Studio KEEP KEXCO",
         tags=parse_tags("vrchat, shorts"),

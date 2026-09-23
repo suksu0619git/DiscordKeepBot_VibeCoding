@@ -4,7 +4,7 @@
 
     /크레딧 → 1차 모달(5칸) → [제출]
            → ephemeral 안내 + "2단계 입력" 버튼(View)
-           → 버튼 클릭 → 2차 모달(5칸) → [제출]
+           → 버튼 클릭 → 2차 모달(4칸) → [제출]
            → 크레딧 코드블록 출력 + FR-2 자동 갱신 결과 ephemeral 안내
 
 참여자 5개 역할(Production/Edit/3D/Filming/Act)은 텍스트가 아니라 **유저 선택
@@ -66,7 +66,6 @@ class CreditSession:
         self.raw.update(values)
         self.picked.update(picks)
         self.data.act = _to_people(picks["Act"])
-        self.data.music = values["음악"]
         self.data.music_link = values["음악 링크"]
         self.data.world = values["World"]
         self.data.tags = parse_tags(values["태그"])
@@ -187,14 +186,14 @@ class CreditStep1Modal(discord.ui.DesignerModal):
             )
 
         await interaction.response.send_message(
-            "✅ 1단계 입력 완료. 아래 버튼을 눌러 2단계(Act / 음악 / World / 태그)를 입력해주세요.",
+            "✅ 1단계 입력 완료. 아래 버튼을 눌러 2단계(Act / 음악 링크 / World / 태그)를 입력해주세요.",
             view=CreditStepView(self.cog, self.session, step=2),
             ephemeral=True,
         )
 
 
 class CreditStep2Modal(discord.ui.DesignerModal):
-    """2단계: Act / 음악 / 음악 링크 / World / 태그"""
+    """2단계: Act / 음악 링크 / World / 태그"""
 
     def __init__(self, cog: "CreditCog", session: CreditSession):
         super().__init__(title="영상 크레딧 (2/2)", timeout=VIEW_TIMEOUT)
@@ -208,18 +207,6 @@ class CreditStep2Modal(discord.ui.DesignerModal):
         )
         self.add_item(
             discord.ui.Label(
-                "음악 (아티스트, 음악명)",
-                discord.ui.InputText(
-                    placeholder="Chopin, Nocturne No.2",
-                    value=raw.get("음악"),
-                    max_length=300,
-                    required=False,
-                ),
-                description="없으면 비워두세요 (음악 링크까지 비면 MUSIC 단락이 빠집니다)",
-            )
-        )
-        self.add_item(
-            discord.ui.Label(
                 "음악 링크",
                 discord.ui.InputText(
                     placeholder="https://youtu.be/zql8G-4gE7w",
@@ -227,7 +214,7 @@ class CreditStep2Modal(discord.ui.DesignerModal):
                     max_length=500,
                     required=False,
                 ),
-                description="없으면 비워두세요",
+                description="없으면 비워두세요 (MUSIC 단락이 빠집니다)",
             )
         )
         self.add_item(
@@ -257,10 +244,9 @@ class CreditStep2Modal(discord.ui.DesignerModal):
         try:
             self.session.absorb_step2(
                 values={
-                    "음악": _text(self, 1),
-                    "음악 링크": _text(self, 2),
-                    "World": _text(self, 3),
-                    "태그": _text(self, 4),
+                    "음악 링크": _text(self, 1),
+                    "World": _text(self, 2),
+                    "태그": _text(self, 3),
                 },
                 picks={"Act": _picked(self, 0)},
             )

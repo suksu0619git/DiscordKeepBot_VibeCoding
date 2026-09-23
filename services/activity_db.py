@@ -103,29 +103,6 @@ class Remaining:
             return f"{self.total_days}일 남음 (약 {weeks}주)"
         return f"{self.total_days}일 남음"
 
-    def format_weeks_ko(self) -> str:
-        """만료까지 남은 기간을 '주' 중심으로 표현한다(채널 공지 문구용).
-
-        만료 임박 알림은 남은 일수가 얼마 없을 때 나가므로 주 단위가 읽기 쉽다.
-
-        >>> Remaining(21).format_weeks_ko()
-        '3주 남았습니다'
-        >>> Remaining(13).format_weeks_ko()
-        '1주 6일 남았습니다'
-        >>> Remaining(3).format_weeks_ko()
-        '3일 남았습니다'
-        """
-        if self.expired:
-            return "만료되었습니다"
-        if self.total_days == 0:
-            return "오늘 만료됩니다"
-        weeks, rest_days = divmod(self.total_days, 7)
-        if weeks and rest_days:
-            return f"{weeks}주 {rest_days}일 남았습니다"
-        if weeks:
-            return f"{weeks}주 남았습니다"
-        return f"{rest_days}일 남았습니다"
-
 
 def remaining_breakdown(expire_date: datetime, now: datetime | None = None) -> Remaining:
     """만료일까지 남은 일수를 계산한다(시각은 무시하고 날짜끼리 뺀다)."""
@@ -134,34 +111,43 @@ def remaining_breakdown(expire_date: datetime, now: datetime | None = None) -> R
 
 
 def elapsed_days(last_active: datetime, now: datetime | None = None) -> int:
-    """마지막 활동일로부터 지난 일수(시각은 무시하고 날짜끼리 뺀다).
+    """활동 카운트. 마지막 활동일을 **1일째** 로 세어 하루마다 1씩 늘어난다.
 
-    잔여 일수와 달리 이 값은 `ACTIVITY_PERIOD_DAYS` 설정과 무관하다. 기간 설정을
-    바꿔도 "언제 마지막으로 활동했는가"는 그대로 읽히므로 조회 화면의 주 지표로 쓴다.
+    (시각은 무시하고 날짜끼리 뺀다.) 잔여 일수와 달리 `ACTIVITY_PERIOD_DAYS` 설정과
+    무관하므로 조회 화면·신호등·채널 공지의 유일한 기준으로 쓴다.
+    만료일은 마지막 활동 +90일이므로 만료일 당일의 카운트는 91일(= 90일 초과)이다.
 
+    >>> elapsed_days(datetime(2026, 7, 30, tzinfo=KST), now=datetime(2026, 7, 30, tzinfo=KST))
+    1
     >>> elapsed_days(datetime(2026, 7, 30, tzinfo=KST), now=datetime(2026, 8, 16, tzinfo=KST))
-    17
+    18
     """
     now = now or now_kst()
-    return (now.date() - last_active.date()).days
+    return (now.date() - last_active.date()).days + 1
 
 
 def format_elapsed_ko(days: int) -> str:
-    """경과 일수 표기. 일수를 그대로 보여주고 주 단위를 괄호로 덧붙인다.
+    """활동 카운트 표기. 일수를 그대로 보여준다.
 
-    >>> format_elapsed_ko(0)
-    '오늘 활동'
+    >>> format_elapsed_ko(1)
+    '+1일'
     >>> format_elapsed_ko(17)
-    '+17일 (약 2주)'
-    >>> format_elapsed_ko(3)
-    '+3일'
+    '+17일'
     """
-    if days <= 0:
-        return "오늘 활동"
-    weeks = days // 7
-    if weeks:
-        return f"+{days}일 (약 {weeks}주)"
-    return f"+{days}일"
+    return f"+{max(days, 1)}일"
+
+
+def elapsed_light(days: int, orange_after: int, red_after: int) -> str:
+    """활동 카운트 신호등. `orange_after` 일 초과면 주황, `red_after` 일 초과면 빨강.
+
+    >>> elapsed_light(60, 60, 90), elapsed_light(61, 60, 90), elapsed_light(91, 60, 90)
+    ('🟢', '🟠', '🔴')
+    """
+    if days > red_after:
+        return "🔴"
+    if days > orange_after:
+        return "🟠"
+    return "🟢"
 
 
 # --------------------------------------------------------------------------- #
@@ -191,7 +177,7 @@ class MemberRecord:
         return remaining_breakdown(self.expire_date, now)
 
     def elapsed(self, now: datetime | None = None) -> int:
-        """마지막 활동일로부터 지난 일수."""
+        """활동 카운트(마지막 활동일 = 1일째)."""
         return elapsed_days(self.last_active, now)
 
 
@@ -434,19 +420,21 @@ class ActivityDB:
 
     # ------------------------------------------------------------- FR-2.6 자동 알림
     async def list_pending_warnings(
-        self, within_days: int, now: datetime | None = None
+        self, after_days: int, now: datetime | None = None
     ) -> list[MemberRecord]:
-        """만료가 `within_days` 일 이내이고 아직 경고하지 않은(warned=0) 멤버."""
+        """활동 카운트가 `after_days` 일을 초과했고 아직 공지하지 않은(warned=0) 멤버.
+
+        카운트는 날짜 단위라 저장 문자열 비교 대신 `elapsed_days` 로 거른다.
+        마지막 활동이 오래된 순으로 반환한다.
+        """
         now = now or now_kst()
-        threshold = to_iso(now + timedelta(days=within_days))
         async with self._connect() as conn:
             async with conn.execute(
-                "SELECT * FROM members WHERE warned = 0 AND expire_date <= ?"
-                " ORDER BY expire_date ASC",
-                (threshold,),
+                "SELECT * FROM members WHERE warned = 0 ORDER BY last_active ASC"
             ) as cursor:
                 rows = await cursor.fetchall()
-        return [MemberRecord.from_row(row) for row in rows]
+        records = [MemberRecord.from_row(row) for row in rows]
+        return [r for r in records if elapsed_days(r.last_active, now) > after_days]
 
     async def mark_warned(self, user_ids: list[int]) -> None:
         if not user_ids:

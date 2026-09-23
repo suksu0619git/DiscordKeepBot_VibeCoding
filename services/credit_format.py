@@ -20,12 +20,11 @@ ROLE_LABELS = ("Production", "Edit", "3D", "Filming", "Act")
 # 영상에 따라 참여자·내용이 아예 없을 수 있는 항목. 입력에서 비워둘 수 있고,
 # 비어 있으면 `format_credit` 이 해당 줄을 출력하지 않는다.
 OPTIONAL_ROLES = ("3D", "Filming", "Act")
-OPTIONAL_LABELS = OPTIONAL_ROLES + ("음악", "음악 링크")
+OPTIONAL_LABELS = OPTIONAL_ROLES + ("음악 링크",)
 
 # Discord Modal 은 컴포넌트 5개 제한이 있어 입력을 2단계로 나눈다.
-# (음악명 + 음악 아티스트를 실제 출력 형태 그대로 한 칸에 받으므로 총 10개)
 STEP1_LABELS = ("제목", "Production", "Edit", "3D", "Filming")
-STEP2_LABELS = ("Act", "음악", "음악 링크", "World", "태그")
+STEP2_LABELS = ("Act", "음악 링크", "World", "태그")
 
 
 @dataclass(frozen=True)
@@ -96,11 +95,7 @@ def _strip_wrapper(value: str, opening: str, closing: str) -> str:
 
 @dataclass
 class CreditData:
-    """크레딧 입력값 묶음.
-
-    `음악명`/`음악 아티스트`는 실제 출력이 한 줄(`Chopin, Nocturne No.2`)이므로
-    입력 UI에서도 한 칸으로 받아 `music` 에 그대로 담는다.
-    """
+    """크레딧 입력값 묶음. 음악은 링크 한 칸만 받는다."""
 
     title: str = ""
     production: list[CreditPerson] = field(default_factory=list)
@@ -108,7 +103,6 @@ class CreditData:
     three_d: list[CreditPerson] = field(default_factory=list)
     filming: list[CreditPerson] = field(default_factory=list)
     act: list[CreditPerson] = field(default_factory=list)
-    music: str = ""
     music_link: str = ""
     world: str = ""
     tags: list[str] = field(default_factory=list)
@@ -186,22 +180,18 @@ def format_credit(data: CreditData) -> str:
         if people:
             lines.append(f"{label} : {join(people)}")
 
-    music = data.music.strip()
     music_link = _strip_wrapper(data.music_link, "(", ")")
-    if music or music_link:
-        # 둘 다 비어 있으면 "MUSIC" 머리말과 앞 빈 줄까지 통째로 뺀다.
-        lines += ["", "MUSIC"]
-        if music:
-            lines.append(music)
-        if music_link:
-            lines.append(f"({music_link})")
+    if music_link:
+        # 링크가 비어 있으면 "MUSIC" 머리말과 앞 빈 줄까지 통째로 뺀다.
+        lines += ["", "MUSIC", f"({music_link})"]
 
     lines += [
         "",
         "World",
-        "{" + _strip_wrapper(data.world, "{", "}") + "}",
+        _strip_wrapper(data.world, "{", "}"),
         "",
-        "태그 : " + " ".join(f"#{tag}" for tag in data.tags),
+        # 태그는 "#" 없이 쉼표로 나열한다(영상 설명란에 그대로 붙여넣는 형식).
+        "태그 : " + ", ".join(data.tags),
     ]
     return "\n".join(lines)
 

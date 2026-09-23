@@ -502,27 +502,14 @@ class EventListener(commands.Cog):
         """모달 입력을 일정으로 저장하고 알림 채널에 공지한다."""
         mentions = _mentions_of(picked)
 
-        meeting_info = {
-            "id": interaction.id,
-            "author": getattr(interaction.user, "display_name", str(interaction.user)),
+        await self.add_schedule(
+            target_time=target_time,
+            content=content,
+            mention=mentions,
+            author=getattr(interaction.user, "display_name", str(interaction.user)),
             # 본인이 등록한 일정을 스스로 취소할 수 있게 ID 도 함께 남긴다.
-            "author_id": getattr(interaction.user, "id", None),
-            "time": target_time,
-            "content": content,
-            "mention": mentions,
-            "notified_10m": False,
-        }
-
-        self.meeting_schedule.append(meeting_info)
-        self.meeting_schedule.sort(key=lambda x: x["time"])
-        self.save_schedules()
-
-        logger.info(
-            "일정 등록: %s / %s / 등록자=%s(%s)",
-            target_time.strftime("%Y-%m-%d %H:%M"),
-            content,
-            interaction.user,
-            getattr(interaction.user, "id", "?"),
+            author_id=getattr(interaction.user, "id", None),
+            schedule_id=interaction.id,
         )
 
         past_note = (
@@ -537,14 +524,77 @@ class EventListener(commands.Cog):
             f"{past_note}"
         )
 
+    async def add_schedule(
+        self,
+        *,
+        target_time: datetime,
+        content: str,
+        mention: str = "",
+        author: str = "KeepBot",
+        author_id: int | None = None,
+        schedule_id: str | int | None = None,
+        kind: str | None = None,
+        participants: list[int] | None = None,
+        announce: bool = True,
+    ) -> dict:
+        """일정을 저장하고 알림 채널에 공지한다. 인터랙션 없이도 호출할 수 있다.
+
+        `/일정` 모달 외에 다른 Cog(신입 OT 수요조사 등)도 일정을 넣으므로 저장/공지
+        경로를 여기 하나로 모았다. `kind` · `participants` 는 만든 쪽이 나중에 알아보기
+        위한 꼬리표다(JSON 으로 저장되므로 직렬화 가능한 값만 넣는다).
+        """
+        meeting_info = {
+            "id": schedule_id if schedule_id is not None else int(target_time.timestamp() * 1000),
+            "author": author,
+            "author_id": author_id,
+            "time": target_time,
+            "content": content,
+            "mention": mention,
+            "notified_10m": False,
+        }
+        if kind:
+            meeting_info["kind"] = kind
+        if participants is not None:
+            meeting_info["participants"] = list(participants)
+
+        self.meeting_schedule.append(meeting_info)
+        self.meeting_schedule.sort(key=lambda x: x["time"])
+        self.save_schedules()
+
+        logger.info(
+            "일정 등록: %s / %s / 등록자=%s(%s)",
+            target_time.strftime("%Y-%m-%d %H:%M"),
+            content,
+            author,
+            author_id if author_id is not None else "?",
+        )
+
+        if announce:
+            await self.announce_schedule(meeting_info)
+        return meeting_info
+
+    async def announce_schedule(self, meeting_info: dict) -> None:
+        """알림 채널에 '새 일정' 공지를 올린다."""
         channel = await self.get_target_channel()
-        if channel:
-            embed = discord.Embed(title="📅 새 일정 알림", description=f"**{content}**", color=0x5865F2)
-            embed.add_field(
-                name="시간", value=f"{_ts(target_time)}\n{_ts(target_time, 'R')}", inline=False
-            )
-            embed.set_footer(text=f"등록자 {meeting_info['author']}")
-            await channel.send(content=f"{mentions} 확인해주세요!" if mentions else None, embed=embed)
+        if not channel:
+            return
+        target_time = meeting_info["time"]
+        mention = meeting_info.get("mention") or ""
+        embed = discord.Embed(
+            title="📅 새 일정 알림", description=f"**{meeting_info['content']}**", color=0x5865F2
+        )
+        embed.add_field(
+            name="시간", value=f"{_ts(target_time)}\n{_ts(target_time, 'R')}", inline=False
+        )
+        embed.set_footer(text=f"등록자 {meeting_info['author']}")
+        await channel.send(content=f"{mention} 확인해주세요!" if mention else None, embed=embed)
+
+    def find_schedule(self, schedule_id: str | int) -> dict | None:
+        """id 로 일정을 찾는다(없으면 None). 찾은 dict 를 고친 뒤에는 저장해야 한다."""
+        for m in self.meeting_schedule:
+            if str(m.get("id")) == str(schedule_id):
+                return m
+        return None
 
     def remove_schedule(self, schedule_id: str) -> dict | None:
         """id 로 일정을 지운다. 이미 없으면 None."""
@@ -627,6 +677,8 @@ class EventListener(commands.Cog):
             if now >= m["time"]:
                 embed = discord.Embed(title="🚀 일정 시작!", description=f"**{m['content']}**", color=0xFF0000)
                 await channel.send(content=m["mention"], embed=embed)
+                # 일정을 만든 Cog 가 뒷정리를 할 수 있게 알려준다(예: OT 참가 처리).
+                self.bot.dispatch("schedule_fired", m)
                 changed = True
                 continue
 

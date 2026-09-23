@@ -19,6 +19,9 @@ from services.activity_db import (  # noqa: E402
     ActivityDB,
     NicknameTakenError,
     add_days,
+    elapsed_days,
+    elapsed_light,
+    format_elapsed_ko,
     from_iso,
     remaining_breakdown,
     to_iso,
@@ -97,29 +100,32 @@ class RemainingBreakdownTest(unittest.TestCase):
         self.assertEqual(rem.format_ko(), "6일 남음")
 
 
-class FormatWeeksTest(unittest.TestCase):
-    """채널 공지에 쓰는 '주' 단위 표현 (FR-2.6)."""
+class ElapsedTest(unittest.TestCase):
+    """조회 화면 카운트: 마지막 활동으로부터 +N일 과 신호등."""
 
-    def test_warning_threshold_reads_as_three_weeks(self):
-        # EXPIRATION_WARN_DAYS 기본값 21일 시점의 문구.
-        rem = remaining_breakdown(dt(2026, 8, 20), now=dt(2026, 7, 30))
-        self.assertEqual(rem.format_weeks_ko(), "3주 남았습니다")
+    def test_last_active_day_counts_as_day_one(self):
+        self.assertEqual(elapsed_days(dt(2026, 7, 30, 9), now=dt(2026, 7, 30, 23)), 1)
+        self.assertEqual(format_elapsed_ko(1), "+1일")
+        self.assertEqual(format_elapsed_ko(17), "+17일")
 
-    def test_week_with_remainder_shows_both(self):
-        rem = remaining_breakdown(dt(2026, 8, 12), now=dt(2026, 7, 30))
-        self.assertEqual(rem.format_weeks_ko(), "1주 6일 남았습니다")
+    def test_counts_up_one_per_day(self):
+        self.assertEqual(elapsed_days(dt(2026, 7, 30), now=dt(2026, 7, 31)), 2)
 
-    def test_less_than_a_week_shows_days(self):
-        rem = remaining_breakdown(dt(2026, 8, 2), now=dt(2026, 7, 30))
-        self.assertEqual(rem.format_weeks_ko(), "3일 남았습니다")
+    def test_expire_date_is_over_90(self):
+        # 만료일(마지막 활동 +90일) 당일 카운트는 91 → 빨간불.
+        self.assertEqual(elapsed_days(dt(2026, 7, 30), now=dt(2026, 10, 28)), 91)
+        self.assertEqual(elapsed_light(91, 60, 90), "🔴")
 
-    def test_same_day(self):
-        rem = remaining_breakdown(dt(2026, 7, 30, 1), now=dt(2026, 7, 30, 23))
-        self.assertEqual(rem.format_weeks_ko(), "오늘 만료됩니다")
+    def test_light_is_green_up_to_60_days(self):
+        self.assertEqual(elapsed_light(0, 60, 90), "🟢")
+        self.assertEqual(elapsed_light(60, 60, 90), "🟢")
 
-    def test_expired(self):
-        rem = remaining_breakdown(dt(2026, 6, 15), now=dt(2026, 7, 30))
-        self.assertEqual(rem.format_weeks_ko(), "만료되었습니다")
+    def test_light_is_orange_over_60_days(self):
+        self.assertEqual(elapsed_light(61, 60, 90), "🟠")
+        self.assertEqual(elapsed_light(90, 60, 90), "🟠")
+
+    def test_light_is_red_over_90_days(self):
+        self.assertEqual(elapsed_light(91, 60, 90), "🔴")
 
 
 class ActivityDBTest(unittest.IsolatedAsyncioTestCase):
@@ -249,28 +255,29 @@ class ActivityDBTest(unittest.IsolatedAsyncioTestCase):
         logs = await self.db.list_credit_logs(1)
         self.assertEqual({log.role_in_video for log in logs}, {"Production", "Filming"})
 
-    async def test_list_pending_warnings_respects_window_and_flag(self):
+    async def test_list_pending_warnings_is_strictly_over_the_count(self):
         now = dt(2026, 7, 30)
-        await self.db.register(1, "soon", PERIOD, now=dt(2026, 5, 5))  # 만료 8/3 → 4일 남음
-        await self.db.register(2, "later", PERIOD, now=now)  # 만료 10/28
-        await self.db.register(3, "warned", PERIOD, now=dt(2026, 5, 5))
+        await self.db.register(1, "day61", PERIOD, now=dt(2026, 5, 31))  # +61일째
+        await self.db.register(2, "day60", PERIOD, now=dt(2026, 6, 1))  # +60일째
+        await self.db.register(3, "warned", PERIOD, now=dt(2026, 5, 1))
         await self.db.mark_warned([3])
 
-        pending = await self.db.list_pending_warnings(21, now=now)
-        self.assertEqual([r.nickname for r in pending], ["soon"])
+        pending = await self.db.list_pending_warnings(60, now=now)
+        self.assertEqual([r.nickname for r in pending], ["day61"])
 
-    async def test_list_pending_warnings_includes_already_expired(self):
+    async def test_list_pending_warnings_includes_already_expired_oldest_first(self):
         now = dt(2026, 7, 30)
-        await self.db.register(1, "gone", PERIOD, now=dt(2026, 1, 1))  # 만료 4/1
-        pending = await self.db.list_pending_warnings(21, now=now)
-        self.assertEqual([r.nickname for r in pending], ["gone"])
+        await self.db.register(1, "day61", PERIOD, now=dt(2026, 5, 31))
+        await self.db.register(2, "gone", PERIOD, now=dt(2026, 1, 1))
+        pending = await self.db.list_pending_warnings(60, now=now)
+        self.assertEqual([r.nickname for r in pending], ["gone", "day61"])
 
     async def test_mark_warned_prevents_duplicate_notification(self):
         now = dt(2026, 7, 30)
-        await self.db.register(1, "soon", PERIOD, now=dt(2026, 5, 5))
-        first = await self.db.list_pending_warnings(21, now=now)
+        await self.db.register(1, "old", PERIOD, now=dt(2026, 5, 5))
+        first = await self.db.list_pending_warnings(60, now=now)
         await self.db.mark_warned([r.user_id for r in first])
-        second = await self.db.list_pending_warnings(21, now=now)
+        second = await self.db.list_pending_warnings(60, now=now)
         self.assertEqual(len(first), 1)
         self.assertEqual(second, [])
 
