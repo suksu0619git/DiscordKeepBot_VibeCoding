@@ -53,6 +53,9 @@ LIST_LIMIT = 40  # /ot명단 에 한 번에 보여줄 인원 수
 NOTICE_TIME = dt.time(
     hour=config.OT_NOTICE_HOUR, minute=config.OT_NOTICE_MINUTE, tzinfo=KST
 )
+DEADLINE_TIME = dt.time(
+    hour=config.OT_DEADLINE_HOUR, minute=config.OT_DEADLINE_MINUTE, tzinfo=KST
+)
 
 
 def schedule_id_for(day: dt.date) -> str:
@@ -72,6 +75,7 @@ class OtNotice(commands.Cog):
         self.db = OtAttendanceDB(config.OT_DB_PATH)
         # 리로드 직후 같은 날 두 번 올라가는 일을 막는 최소한의 방어.
         self._last_sent_date: dt.date | None = None
+        self._last_deadline_date: dt.date | None = None
         self._ready_done = False
         # 반응이 연달아 들어와도 일정이 두 번 만들어지지 않게 한 번에 하나씩 처리한다.
         self._sync_lock = asyncio.Lock()
@@ -88,6 +92,7 @@ class OtNotice(commands.Cog):
             return
 
         self.weekly_notice.start()
+        self.deadline_notice.start()
         logger.info(
             "신입 OT 수요조사 공지 예약: 매주 %s요일 %02d:%02d (KST) → 채널 %s"
             " · 미참가자 반응 시 당일 %02d:%02d 일정 등록",
@@ -98,9 +103,16 @@ class OtNotice(commands.Cog):
             config.OT_SCHEDULE_HOUR,
             config.OT_SCHEDULE_MINUTE,
         )
+        logger.info(
+            "신입 OT 마감 공지 예약: %02d:%02d (KST) → 채널 %s",
+            config.OT_DEADLINE_HOUR,
+            config.OT_DEADLINE_MINUTE,
+            config.OT_DEADLINE_CHANNEL_ID,
+        )
 
     def cog_unload(self):
         self.weekly_notice.cancel()
+        self.deadline_notice.cancel()
 
     def _now(self) -> dt.datetime:
         # 테스트에서 시각을 갈아끼울 수 있도록 한 곳으로 모아 둔다.
@@ -225,6 +237,101 @@ class OtNotice(commands.Cog):
 
     @weekly_notice.before_loop
     async def before_weekly_notice(self):
+        await self.bot.wait_until_ready()
+
+    # ------------------------------------------------------------------ #
+    # 마감 공지 — "오늘 OT 하는지" 를 하루 한 번 알린다
+    # ------------------------------------------------------------------ #
+    async def _get_deadline_channel(self) -> discord.abc.Messageable | None:
+        channel_id = config.OT_DEADLINE_CHANNEL_ID
+        if channel_id is None:
+            logger.warning("OT 마감 공지 채널이 없어 공지를 보내지 못했습니다.")
+            return None
+        channel = self.bot.get_channel(channel_id)
+        if channel is None:
+            try:
+                channel = await self.bot.fetch_channel(channel_id)
+            except discord.HTTPException as exc:
+                logger.error("OT 마감 공지 채널(%s) 을 가져오지 못했습니다: %s", channel_id, exc)
+                return None
+        if not isinstance(channel, discord.abc.Messageable):
+            logger.error("OT 마감 공지 채널(%s) 에 메시지를 보낼 수 없습니다.", channel_id)
+            return None
+        return channel
+
+    async def deadline_summary(self) -> tuple[bool, list[int]] | None:
+        """마감 시점의 반응을 읽어 (진행 여부, 반응자 전원) 을 돌려준다.
+
+        오늘 올라간 수요조사가 없으면 None — 공지할 것이 없다는 뜻이다.
+        진행 여부는 `_sync_participants` 와 같은 기준(미참가자가 한 명이라도 있는가)이다.
+        """
+        raw_date = await self.db.get_meta(META_NOTICE_DATE)
+        if not raw_date or dt.date.fromisoformat(raw_date) != self._now().date():
+            return None
+
+        message = await self._fetch_notice_message()
+        if message is None:
+            return None
+
+        participants = await self._reacted_user_ids(message)
+        attended = await self.db.attended_user_ids()
+        pending = [user_id for user_id in participants if user_id not in attended]
+        return bool(pending), participants
+
+    def _deadline_text(self, will_open: bool, participants: list[int]) -> str:
+        if not will_open:
+            return config.OT_DEADLINE_CLOSED_MESSAGE
+        text = config.OT_DEADLINE_OPEN_MESSAGE.format(
+            time=f"{config.OT_SCHEDULE_HOUR}시",
+            place=config.OT_DEADLINE_PLACE,
+        )
+        if participants:
+            text += f"\n\n참가 : {mentions_of(participants)}"
+        return text
+
+    async def send_deadline_notice(self) -> discord.Message | None:
+        """마감 공지를 한 번 보낸다. 오늘 수요조사가 없으면 아무것도 하지 않는다."""
+        summary = await self.deadline_summary()
+        if summary is None:
+            return None
+        will_open, participants = summary
+
+        channel = await self._get_deadline_channel()
+        if channel is None:
+            return None
+
+        message = await channel.send(
+            self._deadline_text(will_open, participants),
+            # 참가자에게는 실제로 알림이 가야 하지만 @everyone/역할은 막는다.
+            allowed_mentions=discord.AllowedMentions(
+                everyone=False, roles=False, users=True
+            ),
+        )
+        logger.info(
+            "신입 OT 마감 공지 발송: %s (반응자 %d명 %s)",
+            "진행" if will_open else "휴무",
+            len(participants),
+            participants,
+        )
+        return message
+
+    @tasks.loop(time=DEADLINE_TIME)
+    async def deadline_notice(self):
+        now = self._now()
+        if self._last_deadline_date == now.date():
+            logger.info("신입 OT 마감 공지는 오늘 이미 보냈습니다. 건너뜁니다.")
+            return
+        try:
+            message = await self.send_deadline_notice()
+        except Exception:
+            # 루프가 죽지 않도록 반드시 잡는다(주간 공지와 같은 이유).
+            logger.exception("신입 OT 마감 공지 중 오류")
+            return
+        if message is not None:
+            self._last_deadline_date = now.date()
+
+    @deadline_notice.before_loop
+    async def before_deadline_notice(self):
         await self.bot.wait_until_ready()
 
     # ------------------------------------------------------------------ #

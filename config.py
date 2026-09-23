@@ -147,6 +147,25 @@ OT_SCHEDULE_HOUR: int = _get_int_req("OT_SCHEDULE_HOUR", 21)
 OT_SCHEDULE_MINUTE: int = _get_int_req("OT_SCHEDULE_MINUTE", 0)
 OT_SCHEDULE_CONTENT: str = _get_str("OT_SCHEDULE_CONTENT", "신입 오리엔테이션")
 
+# 수요조사 마감. 이 시각에 그때까지 모인 반응을 기준으로 "오늘 OT 하는지"를 한 번 공지한다.
+# 마감 뒤에 눌린 반응도 21시 일정에는 계속 반영된다(공지만 이 시점 기준이다).
+OT_DEADLINE_HOUR: int = _get_int_req("OT_DEADLINE_HOUR", 19)
+OT_DEADLINE_MINUTE: int = _get_int_req("OT_DEADLINE_MINUTE", 0)
+# 마감 공지를 올릴 채널. 비우면 일정 알림 채널(MEETING_NOTIFY_CHANNEL_ID)로 간다.
+OT_DEADLINE_CHANNEL_ID: int | None = (
+    _get_int("OT_DEADLINE_CHANNEL_ID") or MEETING_NOTIFY_CHANNEL_ID
+)
+OT_DEADLINE_PLACE: str = _get_str("OT_DEADLINE_PLACE", "Studio KEEP KEXCO")
+# {time} = OT 시각(예: "21시"), {place} = OT_DEADLINE_PLACE
+_DEFAULT_OT_DEADLINE_OPEN = "🐣 금일 {time} 신입 OT 진행합니다~\n장소 : {place}"
+_DEFAULT_OT_DEADLINE_CLOSED = "🌙 오늘 신입 OT는 쉬어갑니다~"
+OT_DEADLINE_OPEN_MESSAGE: str = _get_str(
+    "OT_DEADLINE_OPEN_MESSAGE", _DEFAULT_OT_DEADLINE_OPEN
+).replace("\\n", "\n")
+OT_DEADLINE_CLOSED_MESSAGE: str = _get_str(
+    "OT_DEADLINE_CLOSED_MESSAGE", _DEFAULT_OT_DEADLINE_CLOSED
+).replace("\\n", "\n")
+
 # 참가 이력 DB. "한 번이라도 OT 를 들었는가" 만 담는다(활동 관리 DB 와 별개).
 OT_DB_PATH: str = _get_str("OT_DB_PATH", os.path.join(BASE_DIR, "data", "ot.db"))
 # 최초 1회 스캔에서 '참가함' 처리에서 빼둘 기존 인원(= 아직 OT 를 안 들은 사람).
