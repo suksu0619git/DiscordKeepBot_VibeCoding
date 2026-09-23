@@ -25,33 +25,22 @@ AFTERNOON = dt.datetime(2026, 9, 23, 15, 0, tzinfo=KST)
 LATE_NIGHT = dt.datetime(2026, 9, 23, 23, 30, tzinfo=KST)
 NEXT_DAY = dt.datetime(2026, 9, 24, 15, 0, tzinfo=KST)
 
-EMOJI = config.OT_NOTICE_EMOJI
-EMOJI_ID = 1507318397191589949
+NOTICE_MESSAGE_ID = 999
 
 OLD_MEMBER = 111  # 기존 인원(참가함으로 시딩됨)
 NEWBIE = 222  # 신입(DB 에 행이 없음 → 미참가)
 EXCLUDED = 333  # 기존 인원이지만 OT 를 안 들어 예외로 지정된 사람
 
 
-class FakeEmoji:
-    def __init__(self, emoji_id: int):
-        self.id = emoji_id
+async def set_joining(db, user_ids: list[int]) -> None:
+    """'참가' 를 누른 사람을 그대로 맞춘다(기존 응답은 지운다).
 
-
-class FakeReaction:
-    def __init__(self, emoji, user_ids: list[int]):
-        self.emoji = emoji
-        self._user_ids = user_ids
-
-    def users(self):
-        async def gen():
-            for user_id in self._user_ids:
-                user = MagicMock()
-                user.id = user_id
-                user.bot = False
-                yield user
-
-        return gen()
+    버튼은 이모지와 달리 디스코드가 들고 있지 않으므로 DB 가 유일한 근거다.
+    """
+    for existing in await db.response_user_ids(NOTICE_MESSAGE_ID, True):
+        await db.clear_response(NOTICE_MESSAGE_ID, existing)
+    for user_id in user_ids:
+        await db.set_response(NOTICE_MESSAGE_ID, user_id, True)
 
 
 class FakeEventListener:
@@ -90,7 +79,7 @@ class FakeEventListener:
         self.saved += 1
 
 
-async def make_cog(reacted: list[int], now: dt.datetime, notice_date: dt.date = NOTICE_DAY):
+async def make_cog(joining: list[int], now: dt.datetime, notice_date: dt.date = NOTICE_DAY):
     """OtNotice 를 __init__ 없이 만들고 DB·공지 메시지·EventListener 를 붙인다."""
     from cogs.ot_notice import OtNotice
     from services.ot_db import (
@@ -103,7 +92,7 @@ async def make_cog(reacted: list[int], now: dt.datetime, notice_date: dt.date = 
     await db.init_schema()
     # 기존 인원 스캔: OLD_MEMBER 는 참가함, EXCLUDED 는 예외라 미참가. NEWBIE 는 아예 없음.
     await db.seed([OLD_MEMBER, EXCLUDED], [EXCLUDED])
-    await db.set_meta(META_NOTICE_MESSAGE_ID, 999)
+    await db.set_meta(META_NOTICE_MESSAGE_ID, NOTICE_MESSAGE_ID)
     await db.set_meta(META_NOTICE_CHANNEL_ID, 888)
     await db.set_meta(META_NOTICE_DATE, notice_date.isoformat())
 
@@ -115,12 +104,10 @@ async def make_cog(reacted: list[int], now: dt.datetime, notice_date: dt.date = 
     cog._sync_lock = asyncio.Lock()
     cog._now = lambda: now
 
-    import discord
-
-    cog._notice_emoji = discord.PartialEmoji.from_str(EMOJI)
+    await set_joining(db, joining)
 
     message = MagicMock()
-    message.reactions = [FakeReaction(FakeEmoji(EMOJI_ID), reacted)]
+    message.id = NOTICE_MESSAGE_ID
 
     async def fetch():
         return message
@@ -132,9 +119,9 @@ async def make_cog(reacted: list[int], now: dt.datetime, notice_date: dt.date = 
     return cog, events, db
 
 
-class ReactionToScheduleTest(unittest.IsolatedAsyncioTestCase):
-    async def test_newbie_reaction_creates_schedule(self):
-        cog, events, _ = await make_cog([NEWBIE], AFTERNOON)
+class ButtonToScheduleTest(unittest.IsolatedAsyncioTestCase):
+    async def test_newbie_join_creates_schedule(self):
+        cog, events, db = await make_cog([NEWBIE], AFTERNOON)
         await cog._sync_participants()
 
         self.assertEqual(len(events.schedules), 1)
@@ -149,47 +136,47 @@ class ReactionToScheduleTest(unittest.IsolatedAsyncioTestCase):
 
     async def test_excluded_existing_member_also_triggers(self):
         """기존 인원이어도 예외로 지정돼 있으면(= OT 를 안 들었으면) 일정이 잡힌다."""
-        cog, events, _ = await make_cog([EXCLUDED], AFTERNOON)
+        cog, events, db = await make_cog([EXCLUDED], AFTERNOON)
         await cog._sync_participants()
         self.assertEqual(events.schedules[0]["participants"], [EXCLUDED])
 
     async def test_attended_member_alone_does_not_trigger(self):
-        cog, events, _ = await make_cog([OLD_MEMBER], AFTERNOON)
+        cog, events, db = await make_cog([OLD_MEMBER], AFTERNOON)
         await cog._sync_participants()
         self.assertEqual(events.schedules, [])
 
-    async def test_every_reactor_is_mentioned_not_just_pending_ones(self):
-        """멘션 대상은 누른 사람 전원 — 트리거만 미참가자 기준이다."""
-        cog, events, _ = await make_cog([OLD_MEMBER, NEWBIE], AFTERNOON)
+    async def test_everyone_who_joined_is_mentioned_not_just_pending_ones(self):
+        """멘션 대상은 참가를 누른 사람 전원 — 트리거만 미참가자 기준이다."""
+        cog, events, db = await make_cog([OLD_MEMBER, NEWBIE], AFTERNOON)
         await cog._sync_participants()
 
         schedule = events.schedules[0]
         self.assertEqual(schedule["participants"], [OLD_MEMBER, NEWBIE])
         self.assertEqual(schedule["mention"], f"<@{OLD_MEMBER}> <@{NEWBIE}>")
 
-    async def test_attended_reactor_joining_later_is_added_to_mentions(self):
-        cog, events, _ = await make_cog([NEWBIE], AFTERNOON)
+    async def test_attended_member_joining_later_is_added_to_mentions(self):
+        cog, events, db = await make_cog([NEWBIE], AFTERNOON)
         await cog._sync_participants()
-        cog._fetch_notice_message = _message_with([NEWBIE, OLD_MEMBER])
+        await set_joining(db, [NEWBIE, OLD_MEMBER])
         await cog._sync_participants()
 
         self.assertEqual(len(events.schedules), 1)
         self.assertEqual(events.schedules[0]["participants"], [NEWBIE, OLD_MEMBER])
 
-    async def test_schedule_removed_when_only_attended_reactors_remain(self):
-        """미참가자가 반응을 취소하면, 기존 참가자가 남아 있어도 OT 는 열지 않는다."""
-        cog, events, _ = await make_cog([NEWBIE, OLD_MEMBER], AFTERNOON)
+    async def test_schedule_removed_when_only_attended_members_remain(self):
+        """미참가자가 응답을 취소하면, 기존 참가자가 남아 있어도 OT 는 열지 않는다."""
+        cog, events, db = await make_cog([NEWBIE, OLD_MEMBER], AFTERNOON)
         await cog._sync_participants()
-        cog._fetch_notice_message = _message_with([OLD_MEMBER])
+        await set_joining(db, [OLD_MEMBER])
         await cog._sync_participants()
 
         self.assertEqual(events.schedules, [])
 
-    async def test_second_reaction_updates_instead_of_duplicating(self):
-        cog, events, _ = await make_cog([NEWBIE], AFTERNOON)
+    async def test_second_join_updates_instead_of_duplicating(self):
+        cog, events, db = await make_cog([NEWBIE], AFTERNOON)
         await cog._sync_participants()
-        # 두 번째 미참가자가 추가로 눌렀다.
-        cog._fetch_notice_message = _message_with([NEWBIE, EXCLUDED])
+        # 두 번째 미참가자가 추가로 참가를 눌렀다.
+        await set_joining(db, [NEWBIE, EXCLUDED])
         await cog._sync_participants()
 
         self.assertEqual(len(events.schedules), 1)
@@ -198,19 +185,19 @@ class ReactionToScheduleTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(events.saved, 1)
 
     async def test_schedule_removed_when_everyone_cancels(self):
-        cog, events, _ = await make_cog([NEWBIE], AFTERNOON)
+        cog, events, db = await make_cog([NEWBIE], AFTERNOON)
         await cog._sync_participants()
-        cog._fetch_notice_message = _message_with([])
+        await set_joining(db, [])
         await cog._sync_participants()
         self.assertEqual(events.schedules, [])
 
-    async def test_ignores_reactions_after_the_notice_day(self):
-        cog, events, _ = await make_cog([NEWBIE], NEXT_DAY)
+    async def test_ignores_responses_after_the_notice_day(self):
+        cog, events, db = await make_cog([NEWBIE], NEXT_DAY)
         await cog._sync_participants()
         self.assertEqual(events.schedules, [])
 
     async def test_does_not_create_schedule_in_the_past(self):
-        cog, events, _ = await make_cog([NEWBIE], LATE_NIGHT)
+        cog, events, db = await make_cog([NEWBIE], LATE_NIGHT)
         await cog._sync_participants()
         self.assertEqual(events.schedules, [])
 
@@ -238,21 +225,6 @@ class AttendanceAfterOtTest(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(await db.is_attended(NEWBIE))
 
 
-class EmojiMatchTest(unittest.IsolatedAsyncioTestCase):
-    async def test_matches_by_custom_emoji_id_only(self):
-        cog, _, _ = await make_cog([], AFTERNOON)
-        self.assertTrue(cog._emoji_matches(FakeEmoji(EMOJI_ID)))
-        self.assertFalse(cog._emoji_matches(FakeEmoji(123)))
-
-
-def _message_with(user_ids: list[int]):
-    message = MagicMock()
-    message.reactions = [FakeReaction(FakeEmoji(EMOJI_ID), user_ids)]
-
-    async def fetch():
-        return message
-
-    return fetch
 
 
 if __name__ == "__main__":

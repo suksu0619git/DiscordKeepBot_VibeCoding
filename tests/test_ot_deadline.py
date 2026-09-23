@@ -1,7 +1,7 @@
 """신입 OT 마감(19:00) 공지 단위 테스트.
 
-마감은 '그 시점까지 모인 반응' 으로 오늘 OT 를 여는지 한 번 알리는 것이 전부다.
-마감 뒤에 눌린 반응도 21시 일정에는 계속 반영되므로, 여기서 검증하는 건
+마감은 '그 시점까지 모인 응답' 으로 오늘 OT 를 여는지 한 번 알리는 것이 전부다.
+마감 뒤에 눌린 버튼도 21시 일정에는 계속 반영되므로, 여기서 검증하는 건
 **공지 문구 선택과 중복 발송 방지**다.
 """
 
@@ -24,7 +24,7 @@ NEWBIE = 111  # 아직 OT 를 안 들은 사람
 VETERAN = 222  # 이미 들은 사람
 
 
-def make_cog(now: dt.datetime, reacted: list[int], attended: set[int], notice_date=None):
+def make_cog(now: dt.datetime, joining: list[int], attended: set[int], notice_date=None):
     from cogs.ot_notice import OtNotice
 
     cog = OtNotice.__new__(OtNotice)
@@ -37,25 +37,25 @@ def make_cog(now: dt.datetime, reacted: list[int], attended: set[int], notice_da
     )
     cog.db.attended_user_ids = AsyncMock(return_value=attended)
     cog._fetch_notice_message = AsyncMock(return_value=MagicMock())
-    cog._reacted_user_ids = AsyncMock(return_value=reacted)
+    cog._joining_user_ids = AsyncMock(return_value=joining)
     return cog
 
 
 class DeadlineSummaryTest(unittest.IsolatedAsyncioTestCase):
-    async def test_newbie_reacted_means_open(self):
+    async def test_newbie_joined_means_open(self):
         cog = make_cog(TODAY, [NEWBIE, VETERAN], {VETERAN})
         will_open, participants = await cog.deadline_summary()
         self.assertTrue(will_open)
         self.assertEqual(participants, [NEWBIE, VETERAN])
 
     async def test_only_veterans_means_closed(self):
-        """이미 들은 사람만 눌렀으면 OT 를 열지 않는다(일정 등록 규칙과 동일)."""
+        """이미 들은 사람만 참가를 눌렀으면 OT 를 열지 않는다(일정 등록 규칙과 동일)."""
         cog = make_cog(TODAY, [VETERAN], {VETERAN})
         will_open, participants = await cog.deadline_summary()
         self.assertFalse(will_open)
         self.assertEqual(participants, [VETERAN])
 
-    async def test_no_reaction_means_closed(self):
+    async def test_no_response_means_closed(self):
         cog = make_cog(TODAY, [], {VETERAN})
         will_open, _ = await cog.deadline_summary()
         self.assertFalse(will_open)

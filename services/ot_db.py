@@ -46,6 +46,16 @@ CREATE TABLE IF NOT EXISTS ot_meta (
     key   TEXT PRIMARY KEY,
     value TEXT
 );
+
+-- 수요조사 버튼 응답. 반응(이모지)과 달리 디스코드가 들고 있지 않으므로 직접 저장한다.
+-- 공지 메시지별로 남기기 때문에 지난 주 응답이 이번 주에 섞이지 않는다.
+CREATE TABLE IF NOT EXISTS ot_responses (
+    message_id INTEGER NOT NULL,
+    user_id    INTEGER NOT NULL,
+    joining    INTEGER NOT NULL,  -- 1=참가, 0=불참
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (message_id, user_id)
+);
 """
 
 META_SEEDED_AT = "seeded_at"  # 최초 스캔 완료 시각(있으면 다시 스캔하지 않는다)
@@ -183,6 +193,56 @@ class OtAttendanceDB:
             len(excluded),
         )
         return (len(attended), len(excluded))
+
+    # ------------------------------------------------------------- 버튼 응답
+    async def get_response(self, message_id: int, user_id: int) -> bool | None:
+        """참가=True / 불참=False / 아직 안 누름=None."""
+        async with self._connect() as conn:
+            async with conn.execute(
+                "SELECT joining FROM ot_responses WHERE message_id = ? AND user_id = ?",
+                (message_id, user_id),
+            ) as cursor:
+                row = await cursor.fetchone()
+        return bool(row["joining"]) if row else None
+
+    async def set_response(
+        self,
+        message_id: int,
+        user_id: int,
+        joining: bool,
+        now: datetime | None = None,
+    ) -> None:
+        stamp = (now or now_kst()).isoformat()
+        async with self._connect() as conn:
+            await conn.execute(
+                "INSERT INTO ot_responses (message_id, user_id, joining, updated_at)"
+                " VALUES (?, ?, ?, ?)"
+                " ON CONFLICT(message_id, user_id) DO UPDATE SET"
+                " joining = excluded.joining, updated_at = excluded.updated_at",
+                (message_id, user_id, int(joining), stamp),
+            )
+            await conn.commit()
+
+    async def clear_response(self, message_id: int, user_id: int) -> None:
+        """응답 취소(누른 버튼을 다시 누른 경우)."""
+        async with self._connect() as conn:
+            await conn.execute(
+                "DELETE FROM ot_responses WHERE message_id = ? AND user_id = ?",
+                (message_id, user_id),
+            )
+            await conn.commit()
+
+    async def response_user_ids(self, message_id: int, joining: bool) -> list[int]:
+        """누른 순서대로 돌려준다(공지에 보여줄 명단 순서가 바뀌지 않게)."""
+        async with self._connect() as conn:
+            async with conn.execute(
+                "SELECT user_id FROM ot_responses"
+                " WHERE message_id = ? AND joining = ?"
+                " ORDER BY updated_at, user_id",
+                (message_id, int(joining)),
+            ) as cursor:
+                rows = await cursor.fetchall()
+        return [row["user_id"] for row in rows]
 
     # ------------------------------------------------------------- 메타
     async def get_meta(self, key: str) -> str | None:

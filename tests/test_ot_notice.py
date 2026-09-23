@@ -59,7 +59,7 @@ class WeeklyNoticeTest(unittest.IsolatedAsyncioTestCase):
 
 
 class SendNoticeTest(unittest.IsolatedAsyncioTestCase):
-    async def test_posts_message_prereacts_and_remembers_the_message(self):
+    async def test_posts_embed_with_buttons_and_remembers_the_message(self):
         import os
         import tempfile
 
@@ -75,17 +75,23 @@ class SendNoticeTest(unittest.IsolatedAsyncioTestCase):
         message = MagicMock()
         message.id = 4242
         message.channel.id = 777
-        message.add_reaction = AsyncMock()
         channel = MagicMock()
         channel.send = AsyncMock(return_value=message)
         cog._get_channel = AsyncMock(return_value=channel)
 
         sent = await cog.send_notice()
 
+        from cogs.ot_notice import OtNoticeView
+
         self.assertIs(sent, message)
-        self.assertEqual(channel.send.await_args.args[0], config.OT_NOTICE_MESSAGE)
-        message.add_reaction.assert_awaited_once_with(config.OT_NOTICE_EMOJI)
-        # 반응을 감시할 대상으로 이 메시지를 기억해야 한다.
+        kwargs = channel.send.await_args.kwargs
+        # 본문은 임베드 description 으로 들어간다.
+        self.assertEqual(kwargs["embed"].description, config.OT_NOTICE_MESSAGE)
+        # 참가/불참 버튼이 달려 나가야 한다.
+        view = kwargs["view"]
+        self.assertIsInstance(view, OtNoticeView)
+        self.assertEqual([c.label for c in view.children], ["참가", "불참"])
+        # 버튼을 받을 대상으로 이 메시지를 기억해야 한다.
         self.assertEqual(await cog.db.get_meta_int(META_NOTICE_MESSAGE_ID), 4242)
         self.assertEqual(
             await cog.db.get_meta(META_NOTICE_DATE), WEDNESDAY_2PM.date().isoformat()
@@ -96,14 +102,14 @@ class ConfigDefaultsTest(unittest.TestCase):
     def test_defaults_point_at_wednesday_2pm(self):
         self.assertEqual(config.OT_NOTICE_WEEKDAY, 2)  # 0=월 → 2=수
         self.assertEqual((config.OT_NOTICE_HOUR, config.OT_NOTICE_MINUTE), (14, 0))
-        self.assertEqual(config.OT_NOTICE_CHANNEL_ID, 1422581802479910994)
+        self.assertEqual(config.OT_NOTICE_CHANNEL_ID, 1405484426799874109)
 
-    def test_message_is_two_lines_with_emoji(self):
+    def test_message_is_two_lines_pointing_at_the_button(self):
         lines = config.OT_NOTICE_MESSAGE.split("\n")
         self.assertEqual(len(lines), 2)
         self.assertTrue(lines[0].startswith("# "))
         self.assertTrue(lines[1].startswith("## "))
-        self.assertIn(config.OT_NOTICE_EMOJI, lines[1])
+        self.assertIn("참가", lines[1])
 
 
 if __name__ == "__main__":

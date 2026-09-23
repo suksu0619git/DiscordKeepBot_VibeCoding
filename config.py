@@ -125,18 +125,17 @@ MEETING_NOTIFY_CHANNEL_ID: int | None = _get_int("MEETING_NOTIFY_CHANNEL_ID")
 
 # ---------------------------------------------------------------- 신입 OT 수요조사
 # 매주 정해진 요일/시각에 "같은 문구"를 올려 참가 희망자를 모으는 정기 공지.
-# 최소 인원 같은 조건은 두지 않는다 — 반응을 보고 진행 여부는 사람이 판단한다.
-OT_NOTICE_CHANNEL_ID: int | None = _get_int("OT_NOTICE_CHANNEL_ID", 1422581802479910994)
+# 최소 인원 같은 조건은 두지 않는다 — 응답을 보고 진행 여부는 사람이 판단한다.
+OT_NOTICE_CHANNEL_ID: int | None = _get_int("OT_NOTICE_CHANNEL_ID", 1405484426799874109)
 # 0=월 … 2=수 … 6=일 (datetime.weekday() 와 같은 기준)
 OT_NOTICE_WEEKDAY: int = _get_int_req("OT_NOTICE_WEEKDAY", 2)
 OT_NOTICE_HOUR: int = _get_int_req("OT_NOTICE_HOUR", 14)
 OT_NOTICE_MINUTE: int = _get_int_req("OT_NOTICE_MINUTE", 0)
-# 공지에 봇이 미리 달아둘 반응. 비워두면 반응을 달지 않는다.
-OT_NOTICE_EMOJI: str = _get_str("OT_NOTICE_EMOJI", "<:keep_cghm:1507318397191589949>")
+OT_NOTICE_TITLE: str = _get_str("OT_NOTICE_TITLE", "🐣 신입 오리엔테이션 수요조사")
 _DEFAULT_OT_NOTICE_MESSAGE = (
     "# 금일 9시 신입 오리엔테이션✨️\n"
-    "## 참가를 희망하시는 신입분🐣 or 한 번도 안 들어보신 분은 미리 "
-    "<:keep_cghm:1507318397191589949> 눌러주세요!"
+    "## 참가를 희망하시는 신입분🐣 or 한 번도 안 들어보신 분은 "
+    "아래 **참가** 버튼을 눌러주세요!"
 )
 # .env 로 덮어쓸 때는 줄바꿈을 `\n` 두 글자로 적는다.
 _OT_NOTICE_MESSAGE_RAW = _get_str("OT_NOTICE_MESSAGE", _DEFAULT_OT_NOTICE_MESSAGE)

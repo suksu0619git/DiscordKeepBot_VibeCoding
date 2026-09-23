@@ -1,23 +1,26 @@
-"""신입 OT 수요조사 공지 + 반응 기반 일정 자동 등록.
+"""신입 OT 수요조사 공지 + 버튼 응답 기반 일정 자동 등록.
 
 흐름은 이렇다.
 
-1. 매주 수요일 14:00(KST) 에 **매번 같은 문구**의 수요조사를 올리고, 봇이 참가 표시용
-   이모지를 미리 달아둔다(`weekly_notice`).
-2. 그 이모지를 누른 사람 중 **OT 를 한 번도 안 들은 사람이 1명이라도 있으면** 같은 날
+1. 매주 수요일 14:00(KST) 에 **매번 같은 문구**의 수요조사를 임베드로 올린다. 임베드에는
+   `참가` / `불참` 버튼이 달려 있다(`weekly_notice`, `OtNoticeView`).
+2. `참가` 를 누른 사람 중 **OT 를 한 번도 안 들은 사람이 1명이라도 있으면** 같은 날
    21:00 로 OT 일정이 자동 등록된다(`/일정` 과 같은 저장소를 쓴다).
-3. 일정 멘션 대상은 **이모지를 누른 사람 전원**이다 — 미참가자든 이미 들은 사람이든
+3. 일정 멘션 대상은 **참가를 누른 사람 전원**이다 — 미참가자든 이미 들은 사람이든
    누른 사람은 그날 OT 에 오는 사람이기 때문이다. 다만 **열지 말지**를 정하는 건
    미참가자뿐이라, 이미 들은 사람만 눌렀다면 일정은 잡히지 않는다.
-4. 일정 시각이 되면(`on_schedule_fired`) 누른 사람들을 '참가함' 으로 찍는다. 다음 주부터
+4. 19:00(`OT_DEADLINE_HOUR`) 에 그때까지 모인 응답으로 오늘 OT 를 여는지 한 번 공지한다
+   (`deadline_notice`). 마감 뒤에 눌러도 일정에는 계속 반영된다.
+5. 일정 시각이 되면(`on_schedule_fired`) 누른 사람들을 '참가함' 으로 찍는다. 다음 주부터
    그 사람들만으로는 일정이 열리지 않는다.
 
 참가 이력은 `services/ot_db.py` 가 들고 있고, 판정은 "행이 없으면 미참가" 다.
 그래서 **최초 1회** 서버 인원을 스캔해 기존 인원을 참가함으로 찍어두면(`_seed_once`),
 그 뒤에 들어오는 사람은 자동으로 OT 대상이 된다.
 
-반응은 취소될 수도 있고 봇이 꺼져 있는 동안 눌릴 수도 있으므로, 이벤트마다 개별 처리
-하지 않고 **메시지의 현재 반응 목록을 다시 읽어 일정 상태를 맞추는**(`_sync_participants`)
+이모지 반응과 달리 **버튼은 누른 사람을 디스코드가 들고 있지 않으므로** 응답을
+`ot_responses` 테이블에 직접 저장한다(공지 메시지별로 남겨 지난 주와 섞이지 않는다).
+일정 상태는 버튼을 누를 때마다 **저장된 응답을 다시 읽어 맞추는**(`_sync_participants`)
 한 가지 경로로만 반영한다.
 """
 
@@ -67,8 +70,36 @@ def mentions_of(user_ids: list[int]) -> str:
     return " ".join(f"<@{user_id}>" for user_id in user_ids)
 
 
+class OtNoticeView(discord.ui.View):
+    """수요조사 참가/불참 버튼.
+
+    봇이 재기동해도 버튼이 살아 있어야 하므로 **timeout 없이 custom_id 를 고정**하고,
+    `on_ready` 에서 `bot.add_view()` 로 다시 등록한다(= persistent view).
+    이모지 반응과 달리 디스코드가 누른 사람을 들고 있지 않으므로 응답은 DB 에 저장한다.
+    """
+
+    JOIN_ID = "ot:join"
+    DECLINE_ID = "ot:decline"
+
+    def __init__(self, cog: "OtNotice"):
+        super().__init__(timeout=None)
+        self.cog = cog
+
+    @discord.ui.button(
+        label="참가", style=discord.ButtonStyle.success, custom_id=JOIN_ID
+    )
+    async def join(self, button: discord.ui.Button, interaction: discord.Interaction):
+        await self.cog.handle_button(interaction, True)
+
+    @discord.ui.button(
+        label="불참", style=discord.ButtonStyle.danger, custom_id=DECLINE_ID
+    )
+    async def decline(self, button: discord.ui.Button, interaction: discord.Interaction):
+        await self.cog.handle_button(interaction, False)
+
+
 class OtNotice(commands.Cog):
-    """신입 OT 수요조사 공지와 그 반응에 따른 일정 등록."""
+    """신입 OT 수요조사 공지와 그 버튼 응답에 따른 일정 등록."""
 
     def __init__(self, bot: discord.Bot):
         self.bot = bot
@@ -77,13 +108,8 @@ class OtNotice(commands.Cog):
         self._last_sent_date: dt.date | None = None
         self._last_deadline_date: dt.date | None = None
         self._ready_done = False
-        # 반응이 연달아 들어와도 일정이 두 번 만들어지지 않게 한 번에 하나씩 처리한다.
+        # 버튼이 연달아 눌려도 일정이 두 번 만들어지지 않게 한 번에 하나씩 처리한다.
         self._sync_lock = asyncio.Lock()
-        self._notice_emoji = (
-            discord.PartialEmoji.from_str(config.OT_NOTICE_EMOJI)
-            if config.OT_NOTICE_EMOJI
-            else None
-        )
 
         if config.OT_NOTICE_CHANNEL_ID is None:
             logger.warning(
@@ -95,7 +121,7 @@ class OtNotice(commands.Cog):
         self.deadline_notice.start()
         logger.info(
             "신입 OT 수요조사 공지 예약: 매주 %s요일 %02d:%02d (KST) → 채널 %s"
-            " · 미참가자 반응 시 당일 %02d:%02d 일정 등록",
+            " · 미참가자가 참가 버튼을 누르면 당일 %02d:%02d 일정 등록",
             WEEKDAY_NAMES[config.OT_NOTICE_WEEKDAY % 7],
             config.OT_NOTICE_HOUR,
             config.OT_NOTICE_MINUTE,
@@ -119,7 +145,7 @@ class OtNotice(commands.Cog):
         return dt.datetime.now(KST)
 
     # ------------------------------------------------------------------ #
-    # 기동 시 1회: 스키마 · 기존 인원 스캔 · 놓친 반응 반영
+    # 기동 시 1회: 스키마 · 기존 인원 스캔 · 버튼 뷰 등록
     # ------------------------------------------------------------------ #
     @commands.Cog.listener()
     async def on_ready(self):
@@ -128,8 +154,10 @@ class OtNotice(commands.Cog):
         self._ready_done = True
         try:
             await self.db.init_schema()
+            # 재기동 전에 올라간 공지의 버튼도 계속 먹히게 뷰를 다시 등록한다.
+            self.bot.add_view(OtNoticeView(self))
             await self._seed_once()
-            # 봇이 꺼져 있는 동안 눌린 반응을 반영한다.
+            # 봇이 꺼져 있는 동안 눌린 버튼을 반영한다.
             await self._sync_participants()
         except Exception:
             logger.exception("신입 OT 초기화 중 오류")
@@ -185,28 +213,54 @@ class OtNotice(commands.Cog):
             return None
         return channel
 
+    def build_notice_embed(
+        self, joining: list[int], declined: list[int]
+    ) -> discord.Embed:
+        """수요조사 임베드. 버튼을 누를 때마다 이 함수로 다시 만들어 갈아끼운다."""
+        embed = discord.Embed(
+            title=config.OT_NOTICE_TITLE,
+            description=config.OT_NOTICE_MESSAGE,
+            color=0xFEE75C,
+        )
+        embed.add_field(
+            name=f"✅ 참가 {len(joining)}명",
+            value=mentions_of(joining) if joining else "—",
+            inline=False,
+        )
+        embed.add_field(
+            name=f"❌ 불참 {len(declined)}명",
+            value=mentions_of(declined) if declined else "—",
+            inline=False,
+        )
+        embed.set_footer(
+            text=f"버튼을 다시 누르면 응답이 취소됩니다 · {config.OT_DEADLINE_HOUR}시 마감"
+        )
+        return embed
+
+    async def refresh_notice_embed(self, message: discord.Message) -> None:
+        """저장된 응답으로 공지 임베드를 다시 그린다."""
+        joining = await self.db.response_user_ids(message.id, True)
+        declined = await self.db.response_user_ids(message.id, False)
+        await message.edit(
+            embed=self.build_notice_embed(joining, declined),
+            view=OtNoticeView(self),
+            allowed_mentions=discord.AllowedMentions.none(),
+        )
+
     async def send_notice(self) -> discord.Message | None:
-        """수요조사 공지를 한 번 보내고, 참가 표시용 이모지를 미리 달아준다."""
+        """수요조사 공지를 한 번 보낸다(참가/불참 버튼이 달린 임베드)."""
         channel = await self._get_channel()
         if channel is None:
             return None
 
         message = await channel.send(
-            config.OT_NOTICE_MESSAGE,
+            embed=self.build_notice_embed([], []),
+            view=OtNoticeView(self),
             # 문구에 멘션처럼 보이는 게 들어가도 실제 알림이 가지 않게 막는다.
             allowed_mentions=discord.AllowedMentions.none(),
         )
 
-        if config.OT_NOTICE_EMOJI:
-            try:
-                await message.add_reaction(config.OT_NOTICE_EMOJI)
-            except discord.HTTPException as exc:
-                # 이모지를 못 달아도 공지 자체는 이미 올라갔으므로 실패로 보지 않는다.
-                logger.warning(
-                    "OT 공지 이모지(%s) 를 달지 못했습니다: %s", config.OT_NOTICE_EMOJI, exc
-                )
-
-        # 반응을 감시할 대상은 항상 '가장 최근 공지' 하나다.
+        # 버튼을 받을 대상은 항상 '가장 최근 공지' 하나다.
         await self.db.set_meta(META_NOTICE_MESSAGE_ID, message.id)
         await self.db.set_meta(META_NOTICE_CHANNEL_ID, message.channel.id)
         await self.db.set_meta(META_NOTICE_DATE, self._now().date().isoformat())
@@ -260,7 +314,7 @@ class OtNotice(commands.Cog):
         return channel
 
     async def deadline_summary(self) -> tuple[bool, list[int]] | None:
-        """마감 시점의 반응을 읽어 (진행 여부, 반응자 전원) 을 돌려준다.
+        """마감 시점의 응답을 읽어 (진행 여부, 참가자 전원) 을 돌려준다.
 
         오늘 올라간 수요조사가 없으면 None — 공지할 것이 없다는 뜻이다.
         진행 여부는 `_sync_participants` 와 같은 기준(미참가자가 한 명이라도 있는가)이다.
@@ -273,7 +327,7 @@ class OtNotice(commands.Cog):
         if message is None:
             return None
 
-        participants = await self._reacted_user_ids(message)
+        participants = await self._joining_user_ids(message)
         attended = await self.db.attended_user_ids()
         pending = [user_id for user_id in participants if user_id not in attended]
         return bool(pending), participants
@@ -308,7 +362,7 @@ class OtNotice(commands.Cog):
             ),
         )
         logger.info(
-            "신입 OT 마감 공지 발송: %s (반응자 %d명 %s)",
+            "신입 OT 마감 공지 발송: %s (참가자 %d명 %s)",
             "진행" if will_open else "휴무",
             len(participants),
             participants,
@@ -335,35 +389,40 @@ class OtNotice(commands.Cog):
         await self.bot.wait_until_ready()
 
     # ------------------------------------------------------------------ #
-    # 반응 → 일정 등록
+    # 버튼 → 일정 등록
     # ------------------------------------------------------------------ #
-    def _emoji_matches(self, emoji) -> bool:
-        if self._notice_emoji is None:
-            return False
-        if self._notice_emoji.id is not None:
-            return getattr(emoji, "id", None) == self._notice_emoji.id
-        return str(emoji) == str(self._notice_emoji)
-
-    @commands.Cog.listener()
-    async def on_raw_reaction_add(self, payload: discord.RawReactionActionEvent):
-        await self._on_notice_reaction(payload)
-
-    @commands.Cog.listener()
-    async def on_raw_reaction_remove(self, payload: discord.RawReactionActionEvent):
-        await self._on_notice_reaction(payload)
-
-    async def _on_notice_reaction(self, payload: discord.RawReactionActionEvent) -> None:
-        if self.bot.user and payload.user_id == self.bot.user.id:
-            return
-        if not self._emoji_matches(payload.emoji):
-            return
+    async def handle_button(
+        self, interaction: discord.Interaction, joining: bool
+    ) -> None:
+        """참가/불참 버튼 처리. 같은 버튼을 다시 누르면 응답을 취소한다."""
+        message = interaction.message
         notice_message_id = await self.db.get_meta_int(META_NOTICE_MESSAGE_ID)
-        if notice_message_id is None or payload.message_id != notice_message_id:
-            return
+        if message is None or notice_message_id != message.id:
+            # 지난 주 공지의 버튼을 누른 경우. 옛 공지로 이번 주 일정을 건드리면 안 된다.
+            return await interaction.response.send_message(
+                "⌛ 지난 수요조사입니다. 최신 공지에서 눌러주세요.", ephemeral=True
+            )
+
+        user_id = interaction.user.id
+        current = await self.db.get_response(message.id, user_id)
+        if current == joining:
+            await self.db.clear_response(message.id, user_id)
+            reply = "↩️ 응답을 취소했습니다."
+        else:
+            await self.db.set_response(message.id, user_id, joining)
+            reply = "✅ 참가로 표시했습니다." if joining else "❌ 불참으로 표시했습니다."
+
+        await interaction.response.send_message(reply, ephemeral=True)
+
+        try:
+            await self.refresh_notice_embed(message)
+        except discord.HTTPException as exc:
+            # 임베드 갱신에 실패해도 응답은 이미 저장됐다(일정 계산에는 영향 없음).
+            logger.warning("OT 공지 임베드 갱신 실패: %s", exc)
         try:
             await self._sync_participants()
         except Exception:
-            logger.exception("OT 수요조사 반응 처리 중 오류")
+            logger.exception("OT 수요조사 버튼 처리 중 오류")
 
     async def _fetch_notice_message(self) -> discord.Message | None:
         message_id = await self.db.get_meta_int(META_NOTICE_MESSAGE_ID)
@@ -383,17 +442,14 @@ class OtNotice(commands.Cog):
             logger.info("OT 수요조사 공지(%s) 를 찾을 수 없습니다.", message_id)
             return None
 
-    async def _reacted_user_ids(self, message: discord.Message) -> list[int]:
-        for reaction in message.reactions:
-            if not self._emoji_matches(reaction.emoji):
-                continue
-            return [user.id async for user in reaction.users() if not user.bot]
-        return []
+    async def _joining_user_ids(self, message: discord.Message) -> list[int]:
+        """'참가' 를 누른 사람. 불참·무응답은 빠진다."""
+        return await self.db.response_user_ids(message.id, True)
 
     async def _sync_participants(self) -> dict | None:
-        """공지의 현재 반응을 읽어 OT 일정을 만들거나 고치거나 지운다.
+        """공지의 현재 응답을 읽어 OT 일정을 만들거나 고치거나 지운다.
 
-        반응을 취소하는 경우, 봇이 꺼진 사이 눌린 경우까지 이 한 경로로 처리된다.
+        응답을 취소하는 경우, 봇이 꺼진 사이 눌린 경우까지 이 한 경로로 처리된다.
         """
         async with self._sync_lock:
             raw_date = await self.db.get_meta(META_NOTICE_DATE)
@@ -402,16 +458,16 @@ class OtNotice(commands.Cog):
             notice_date = dt.date.fromisoformat(raw_date)
             today = self._now().date()
             if notice_date != today:
-                # 지난 주 공지에 뒤늦게 눌린 반응으로 과거 일정을 만들지 않는다.
+                # 지난 주 공지를 뒤늦게 눌러 과거 일정을 만드는 일을 막는다.
                 return None
 
             message = await self._fetch_notice_message()
             if message is None:
                 return None
 
-            # 멘션 대상은 반응을 누른 사람 전원(미참가자 + 이미 들은 사람)이다.
+            # 멘션 대상은 참가를 누른 사람 전원(미참가자 + 이미 들은 사람)이다.
             # 다만 **진행 여부**는 미참가자가 한 명이라도 있는지로만 판단한다.
-            participants = await self._reacted_user_ids(message)
+            participants = await self._joining_user_ids(message)
             attended = await self.db.attended_user_ids()
             pending = [user_id for user_id in participants if user_id not in attended]
 
@@ -427,7 +483,7 @@ class OtNotice(commands.Cog):
                 if existing is not None:
                     events.remove_schedule(sid)
                     logger.info(
-                        "미참가 반응자가 남아 있지 않아 OT 일정을 지웠습니다(반응자 %d명).",
+                        "미참가자가 남아 있지 않아 OT 일정을 지웠습니다(참가 %d명).",
                         len(participants),
                     )
                 return None
@@ -439,7 +495,7 @@ class OtNotice(commands.Cog):
                 existing["mention"] = mentions_of(participants)
                 events.save_schedules()
                 logger.info(
-                    "OT 일정 참가자 갱신: 반응자 %d명 %s (그중 미참가 %d명)",
+                    "OT 일정 참가자 갱신: 참가 %d명 %s (그중 미참가 %d명)",
                     len(participants),
                     participants,
                     len(pending),
@@ -468,7 +524,7 @@ class OtNotice(commands.Cog):
                 participants=participants,
             )
             logger.info(
-                "OT 일정 자동 등록: %s / 반응자 %d명 %s (그중 미참가 %d명 %s)",
+                "OT 일정 자동 등록: %s / 참가 %d명 %s (그중 미참가 %d명 %s)",
                 target_time.strftime("%Y-%m-%d %H:%M"),
                 len(participants),
                 participants,
@@ -542,7 +598,7 @@ class OtNotice(commands.Cog):
             description="\n".join(lines),
             color=0xFEE75C,
         )
-        embed.set_footer(text="수요조사에 이 중 한 명이라도 반응하면 그날 OT 일정이 잡힙니다.")
+        embed.set_footer(text="수요조사에서 이 중 한 명이라도 참가를 누르면 그날 OT 일정이 잡힙니다.")
         await ctx.followup.send(embed=embed, ephemeral=True)
 
     @discord.slash_command(
