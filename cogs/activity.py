@@ -13,6 +13,7 @@ from __future__ import annotations
 import csv
 import io
 import logging
+from datetime import datetime
 from dataclasses import dataclass, field
 
 import discord
@@ -141,6 +142,42 @@ class ActivityTracker(commands.Cog):
             return
         await self.db.init_schema()
         self._schema_ready = True
+
+    @commands.Cog.listener()
+    async def on_ready(self):
+        # 캐시 대신 전체 멤버를 API로 확인한다. 조회 실패 시 삭제하지 않는다.
+        try:
+            member_ids = set()
+            if not self.bot.guilds:
+                return
+            for guild in self.bot.guilds:
+                async for member in guild.fetch_members(limit=None):
+                    member_ids.add(member.id)
+            await self._ensure_schema()
+            for record in await self.db.list_all():
+                if record.user_id not in member_ids:
+                    await self.db.delete(record.user_id)
+                    logger.info("기존 퇴장 멤버 활동 기록 정리: %s(%s)", record.nickname, record.user_id)
+        except Exception:
+            logger.exception("퇴장 멤버 활동 기록 정리 실패")
+
+    @commands.Cog.listener()
+    async def on_member_remove(self, member: discord.Member):
+        # 활동 DB는 길드 구분이 없으므로 다른 연결 서버에 남아 있다면 보존한다.
+        for guild in self.bot.guilds:
+            if guild.id == member.guild.id:
+                continue
+            try:
+                await guild.fetch_member(member.id)
+                return
+            except discord.NotFound:
+                continue
+            except discord.HTTPException:
+                logger.warning("다른 서버의 재적 확인 실패: %s — 활동 기록 보존", member.id)
+                return
+        await self._ensure_schema()
+        if await self.db.delete(member.id):
+            logger.info("서버 퇴장에 따라 활동 기록 자동 삭제: %s(%s)", member, member.id)
 
     # ------------------------------------------------------------------ #
     # FR-1 연동 (credit Cog 가 bot.get_cog 으로 호출)
@@ -456,24 +493,42 @@ class ActivityTracker(commands.Cog):
             ephemeral=True,
         )
 
-    @discord.slash_command(name="활동설정", description="잔여 일수를 임의로 지정합니다.")
+    @discord.slash_command(name="활동설정", description="마지막 활동일 또는 잔여 일수를 지정합니다.")
     @require_activity_admin()
     async def activity_set(
         self,
         ctx: discord.ApplicationContext,
         멤버: discord.Member = discord.Option(discord.Member, description="대상 멤버"),
-        일수: int = discord.Option(int, description="오늘부터의 잔여 일수", min_value=0, max_value=3650),
+        일수: int = discord.Option(int, description="오늘부터의 잔여 일수 (음수 허용, 날짜와 동시 입력 불가)", min_value=-3650, max_value=3650, required=False, default=None),
+        마지막활동일: str = discord.Option(str, description="마지막 활동 날짜 (예: 2026-09-01). 과거 날짜 가능", required=False, default=None),
     ):
         await ctx.defer(ephemeral=True)
         await self._ensure_schema()
-        record = await self.db.set_days(멤버.id, 일수)
+        if (일수 is None) == (마지막활동일 is None):
+            return await ctx.followup.send(
+                "❌ `마지막활동일` 또는 `일수` 중 하나만 입력해주세요. 날짜 예: `2026-09-01`",
+                ephemeral=True,
+            )
+        if 마지막활동일 is not None:
+            now = now_kst()
+            try:
+                last_active = datetime.strptime(마지막활동일, "%Y-%m-%d").replace(tzinfo=now.tzinfo)
+                if last_active.strftime("%Y-%m-%d") != 마지막활동일:
+                    raise ValueError
+            except ValueError:
+                return await ctx.followup.send("❌ 날짜를 `2026-09-01`처럼 YYYY-MM-DD 형식으로 입력해주세요.", ephemeral=True)
+            if last_active.date() > now.date():
+                return await ctx.followup.send("❌ 마지막 활동일은 오늘 또는 과거 날짜로 입력해주세요.", ephemeral=True)
+            record = await self.db.set_last_active(멤버.id, last_active, self.days)
+        else:
+            record = await self.db.set_days(멤버.id, 일수)
         if record is None:
             return await ctx.followup.send(
                 f"❌ {멤버.mention} 은(는) 등록되어 있지 않습니다.", ephemeral=True
             )
-        logger.info("활동 설정: %s(%s) → %d일 (%s)", 멤버, 멤버.id, 일수, record.expire_date.date())
+        logger.info("활동 설정: %s(%s) → 마지막 활동 %s / 만료 %s", 멤버, 멤버.id, record.last_active.date(), record.expire_date.date())
         await ctx.followup.send(
-            f"⚙️ {멤버.mention} 잔여 **{일수}일** 설정 완료"
+            f"⚙️ {멤버.mention} 설정 완료 · 마지막 활동 **{record.last_active.strftime('%Y-%m-%d')}**"
             f" · 만료일 **{record.expire_date.strftime('%Y-%m-%d')}**",
             ephemeral=True,
         )

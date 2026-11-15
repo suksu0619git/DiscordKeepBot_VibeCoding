@@ -301,6 +301,12 @@ class ActivityDB:
                 return None
         return await self.get(user_id)
 
+    async def set_last_active(
+        self, user_id: int, last_active: datetime, days: int
+    ) -> MemberRecord | None:
+        """활동 기준일과 그 기준일 + days인 만료일을 함께 변경한다."""
+        return await self.renew(user_id, days, now=last_active)
+
     async def set_days(
         self, user_id: int, days: int, now: datetime | None = None
     ) -> MemberRecord | None:

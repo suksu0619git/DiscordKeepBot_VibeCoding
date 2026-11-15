@@ -194,6 +194,21 @@ class ActivityDBTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(record.expire_date.date().isoformat(), "2027-01-26")
         self.assertEqual(record.last_active.date().isoformat(), "2026-01-01")
 
+    async def test_set_last_active_backdates_and_resets_warning(self):
+        await self.db.register(1, "a", PERIOD, now=dt(2026, 11, 15))
+        await self.db.mark_warned([1])
+        record = await self.db.set_last_active(1, dt(2026, 9, 1), PERIOD)
+        self.assertEqual(record.last_active, dt(2026, 9, 1))
+        self.assertEqual(record.expire_date, add_days(dt(2026, 9, 1), PERIOD))
+        self.assertFalse(record.warned)
+        self.assertIsNone(await self.db.set_last_active(999, dt(2026, 9, 1), PERIOD))
+
+    async def test_negative_remaining_days(self):
+        await self.db.register(1, "a", PERIOD, now=dt(2026, 11, 15))
+        record = await self.db.set_days(1, -10, now=dt(2026, 11, 15))
+        self.assertEqual(record.expire_date.date().isoformat(), "2026-11-05")
+        self.assertEqual(record.last_active.date().isoformat(), "2026-11-15")
+
     async def test_delete(self):
         await self.db.register(1, "a", PERIOD)
         self.assertTrue(await self.db.delete(1))
